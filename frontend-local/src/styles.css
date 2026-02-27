@@ -1,0 +1,97 @@
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fff;
+  color: #000;
+}
+
+.shell {
+  margin: 0 auto;
+  max-width: 1500px;
+  padding: 16px;
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+  border: 1px solid #000;
+  padding: 10px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.connect-button {
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  border-radius: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.connect-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.gallery-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.gallery-card {
+  border: 1px solid #000;
+  background: #fff;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.gallery-image {
+  width: 100%;
+  height: 100%;
+}
+
+.gallery-image svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.loading-card {
+  font-size: 12px;
+}
+
+.sentinel {
+  margin-top: 12px;
+  border-top: 1px solid #000;
+  padding: 14px 0 8px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.error-line {
+  margin-top: 8px;
+  border: 1px solid #000;
+  padding: 8px;
+  font-size: 12px;
+}
