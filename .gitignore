@@ -1,0 +1,37 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+server-ts/.env
+server-ts/.env.*
+
+# Dependencies
+node_modules/
+server-ts/node_modules/
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+frontend-local/dist/
+frontend-local/.next/
+
+# Hardhat / Foundry artifacts
+artifacts/
+cache/
+typechain/
+typechain-types/
+
+# Misc
+.DS_Store
+*.log
+coverage/
+*.db
+*.db-shm
+*.db-wal
+.tools/
+generated/tmp/
+deployments/local_*.json
+deployments/upload-state*.json
+upload-manifest.local.json

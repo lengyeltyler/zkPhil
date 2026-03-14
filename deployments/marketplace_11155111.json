@@ -1,0 +1,10 @@
+{
+  "chainId": 11155111,
+  "PhilMarketplace": "0xF005d21711A6C4e4C36C6aa83604A6AD99Bb4D06",
+  "PhilTestMint": "0xB3Be564d41Dee62774084BBEF2e9c33c507728f1",
+  "protocolFeeBps": 0,
+  "royaltyBps": 369,
+  "royaltyRecipient": "0x4Ee37995416698B0CdBE10dA68d5Fc182dC3Dc62",
+  "owner": "0x4Ee37995416698B0CdBE10dA68d5Fc182dC3Dc62",
+  "paused": false
+}

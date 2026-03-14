@@ -1,0 +1,308 @@
+@charset "utf-8";
+@import url("https://fonts.googleapis.com/css2?family=VT323&family=Silkscreen:wght@400;700&display=swap");
+
+:root {
+  --room: #0b0a08;
+  --case: #d7cfbd;
+  --case-dark: #bfb6a2;
+  --case-shadow: rgba(0, 0, 0, 0.5);
+  --screen: #0e160f;
+  --screen-glow: #6bff7a;
+  --screen-ink: #d7fbdc;
+  --muted: #9fb0a1;
+  --accent: #ffcc4d;
+  --accent-2: #5af1ff;
+  --accent-3: #ff7a7a;
+  --mono: "VT323", monospace;
+  --display: "Silkscreen", sans-serif;
+  --shadow: 0 30px 80px var(--case-shadow);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at 50% 20%, #1a1512, var(--room) 60%);
+  color: var(--screen-ink);
+  font-family: var(--mono);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.room {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 3rem 4vw 5rem;
+}
+
+.monitor {
+  width: min(1200px, 94vw);
+  display: grid;
+  gap: 1.5rem;
+}
+
+.monitor-bezel {
+  background: linear-gradient(180deg, #ebe4d6, var(--case));
+  border-radius: 28px 28px 20px 20px;
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+  border: 2px solid rgba(0, 0, 0, 0.15);
+}
+
+.monitor-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.8rem 0.9rem;
+  font-family: var(--display);
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  color: #5c5549;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.65rem;
+}
+
+.status-pill .lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 8px rgba(90, 241, 255, 0.7);
+}
+
+.screen {
+  position: relative;
+  background: radial-gradient(circle at 50% 40%, rgba(107, 255, 122, 0.12), transparent 60%),
+    var(--screen);
+  border-radius: 18px;
+  padding: 2rem;
+  border: 4px solid #1b1f1a;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+
+.crt {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.05) 0,
+      rgba(255, 255, 255, 0.05) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  mix-blend-mode: soft-light;
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.04), transparent 60%),
+    radial-gradient(circle at center, transparent 55%, rgba(0, 0, 0, 0.7) 100%);
+  pointer-events: none;
+}
+
+.screen-content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1.6rem;
+}
+
+.screen-header h1 {
+  font-family: var(--display);
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  margin: 0 0 0.6rem;
+  letter-spacing: 0.12em;
+  color: var(--screen-ink);
+}
+
+.screen-header p {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.screen-controls {
+  display: grid;
+  gap: 0.8rem;
+  font-size: 1.1rem;
+}
+
+.counter {
+  font-family: var(--display);
+  font-size: 0.9rem;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+.status {
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.button-cluster {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.controller-btn {
+  border: none;
+  font-family: var(--display);
+  font-size: 0.8rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 0.7rem 1.6rem;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 20%, #fff2c2, var(--accent));
+  color: #3a2c18;
+  box-shadow: inset -4px -6px 0 rgba(0, 0, 0, 0.2), 0 8px 16px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.controller-btn.connect {
+  background: radial-gradient(circle at 30% 20%, #e6fbff, var(--accent-2));
+  color: #00333b;
+}
+
+.controller-btn.mint {
+  background: radial-gradient(circle at 30% 20%, #ffe2e2, var(--accent-3));
+  color: #4b1010;
+}
+
+.controller-btn:active {
+  transform: translateY(2px);
+  box-shadow: inset -2px -3px 0 rgba(0, 0, 0, 0.2), 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+.gallery {
+  display: grid;
+  gap: 1.6rem;
+}
+
+.phil-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  animation: rise 0.5s ease both;
+  animation-delay: calc(var(--row-index, 0) * 0.05s);
+}
+
+.phil-card {
+  background: rgba(9, 12, 9, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+}
+
+.phil-art {
+  padding: 0.3rem;
+  background: rgba(8, 12, 8, 0.9);
+}
+
+.phil-art svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.phil-info {
+  padding: 0.35rem 0.45rem 0.45rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.phil-number {
+  font-family: var(--display);
+  font-size: 0.5rem;
+  letter-spacing: 0.16em;
+  color: var(--accent-2);
+}
+
+.phil-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.trait {
+  font-size: 0.5rem;
+  padding: 0.1rem 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.sentinel {
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 2rem 0 1rem;
+}
+
+.monitor-base {
+  height: 80px;
+  background: linear-gradient(180deg, var(--case-dark), #a69c88);
+  border-radius: 0 0 24px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  box-shadow: var(--shadow);
+  border: 2px solid rgba(0, 0, 0, 0.15);
+}
+
+.monitor-base .slot {
+  width: 180px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.monitor-base .logo {
+  font-family: var(--display);
+  font-size: 0.8rem;
+  letter-spacing: 0.3em;
+  color: #3d3427;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 900px) {
+  .monitor-base {
+    height: 64px;
+  }
+}
+
+@media (max-width: 600px) {
+  .screen {
+    padding: 1.5rem;
+  }
+}

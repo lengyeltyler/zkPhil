@@ -1,0 +1,21 @@
+[package]
+name = "phil_allowlist"
+version = "0.1.0"
+edition = "2024_07"
+
+[dependencies]
+cairo_execute = "2.15.0"
+
+[dev-dependencies]
+cairo_test = "2.15.0"
+
+[cairo]
+sierra-replace-ids = true
+enable-gas = false
+
+[[target.executable]]
+
+[[target.lib]]
+
+[tool.scarb-doc]
+enabled = true

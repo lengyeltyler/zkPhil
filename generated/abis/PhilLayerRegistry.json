@@ -1,0 +1,704 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "svgStorageAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "initialOwner",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadyInitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "assetId",
+        "type": "uint32"
+      },
+      {
+        "internalType": "uint16",
+        "name": "expectedLayerId",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint16",
+        "name": "actualLayerId",
+        "type": "uint16"
+      }
+    ],
+    "name": "AssetLayerMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      }
+    ],
+    "name": "EmptyAssetList",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      }
+    ],
+    "name": "InvalidLayerId",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint8",
+        "name": "minSelections",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "maxSelections",
+        "type": "uint8"
+      }
+    ],
+    "name": "InvalidSelectionRange",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidStorageId",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NewOwnerIsZeroAddress",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoHandoverRequest",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "Unauthorized",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "assetId",
+        "type": "uint32"
+      }
+    ],
+    "name": "UnknownAssetId",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "variantId",
+        "type": "uint32"
+      }
+    ],
+    "name": "UnknownVariantId",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint32",
+        "name": "assetId",
+        "type": "uint32"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "storageId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "sublayer",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "fileName",
+        "type": "string"
+      }
+    ],
+    "name": "AssetRegistered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "stackIndex",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "minSelections",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "maxSelections",
+        "type": "uint8"
+      }
+    ],
+    "name": "LayerRegistered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "pendingOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipHandoverCanceled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "pendingOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipHandoverRequested",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "oldOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint32",
+        "name": "variantId",
+        "type": "uint32"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "label",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "style",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "color",
+        "type": "string"
+      }
+    ],
+    "name": "VariantRegistered",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "cancelOwnershipHandover",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pendingOwner",
+        "type": "address"
+      }
+    ],
+    "name": "completeOwnershipHandover",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "assetId",
+        "type": "uint32"
+      }
+    ],
+    "name": "getAsset",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      },
+      {
+        "internalType": "uint256",
+        "name": "storageId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "sublayer",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileName",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      }
+    ],
+    "name": "getLayer",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "internalType": "uint8",
+        "name": "stackIndex",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "minSelections",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "maxSelections",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      }
+    ],
+    "name": "getLayerAssetIds",
+    "outputs": [
+      {
+        "internalType": "uint32[]",
+        "name": "",
+        "type": "uint32[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      }
+    ],
+    "name": "getLayerVariantIds",
+    "outputs": [
+      {
+        "internalType": "uint32[]",
+        "name": "",
+        "type": "uint32[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "variantId",
+        "type": "uint32"
+      }
+    ],
+    "name": "getVariant",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      },
+      {
+        "internalType": "string",
+        "name": "label",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "style",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "color",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint32",
+        "name": "variantId",
+        "type": "uint32"
+      }
+    ],
+    "name": "getVariantAssetIds",
+    "outputs": [
+      {
+        "internalType": "uint32[]",
+        "name": "",
+        "type": "uint32[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "layerCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "nextAssetId",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "nextVariantId",
+    "outputs": [
+      {
+        "internalType": "uint32",
+        "name": "",
+        "type": "uint32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "result",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "pendingOwner",
+        "type": "address"
+      }
+    ],
+    "name": "ownershipHandoverExpiresAt",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "result",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint16",
+            "name": "layerId",
+            "type": "uint16"
+          },
+          {
+            "internalType": "uint256",
+            "name": "storageId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "string",
+            "name": "sublayer",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "fileName",
+            "type": "string"
+          }
+        ],
+        "internalType": "struct PhilLayerRegistry.AssetInput[]",
+        "name": "inputs",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "registerAssets",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "internalType": "uint8",
+        "name": "minSelections",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "maxSelections",
+        "type": "uint8"
+      }
+    ],
+    "name": "registerLayer",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "layerId",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "string",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "internalType": "uint8",
+            "name": "minSelections",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "maxSelections",
+            "type": "uint8"
+          }
+        ],
+        "internalType": "struct PhilLayerRegistry.LayerInput[]",
+        "name": "inputs",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "registerLayers",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint16",
+            "name": "layerId",
+            "type": "uint16"
+          },
+          {
+            "internalType": "string",
+            "name": "label",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "style",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "color",
+            "type": "string"
+          },
+          {
+            "internalType": "uint32[]",
+            "name": "assetIds",
+            "type": "uint32[]"
+          }
+        ],
+        "internalType": "struct PhilLayerRegistry.VariantInput[]",
+        "name": "inputs",
+        "type": "tuple[]"
+      }
+    ],
+    "name": "registerVariants",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "requestOwnershipHandover",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "svgStorage",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  }
+]

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Phil Test13 Mint</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="mint.css" />
+  </head>
+  <body data-view-state="disconnected">
+    <div class="ambient">
+      <div class="halo"></div>
+      <div class="ripple"></div>
+    </div>
+
+    <header id="heroSection" class="mast">
+      <div class="mast-inner">
+        <div class="eyebrow">Phil Test13</div>
+        <h1>Mint Your Phil</h1>
+        <p class="lede">
+          Connect your wallet, scroll through deterministic previews, lock one Phil, and mint with STARK allowlist proof.
+        </p>
+        <p class="how-it-works">
+          Connect → scroll to lock a selection → mint to your Smart Account on local Hardhat.
+        </p>
+
+        <div class="hero-actions">
+          <button id="connectBtn" class="btn primary">Connect Wallet</button>
+          <button id="switchNetworkBtn" class="btn subtle hidden">Switch to Local</button>
+          <a
+            id="installWalletLink"
+            class="install-wallet hidden"
+            href="https://metamask.io/download/"
+            target="_blank"
+            rel="noopener"
+          >
+            Install MetaMask
+          </a>
+        </div>
+
+        <div id="walletStatus" class="status">Wallet disconnected</div>
+        <div id="configBanner" class="config-banner"></div>
+
+        <div id="errorBanner" class="error-banner hidden">
+          <span id="errorMessage"></span>
+          <button id="retryMintBtn" class="btn subtle hidden">Retry</button>
+        </div>
+
+        <div id="flowStepper" class="flow-stepper">
+          <div class="flow-step" data-step="connect">Connect</div>
+          <div class="flow-step" data-step="proof">Fetch Proof</div>
+          <div class="flow-step" data-step="build">Build</div>
+          <div class="flow-step" data-step="submit">Submit</div>
+          <div class="flow-step" data-step="confirmed">Confirmed</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section class="status-strip">
+        <span id="walletPill" class="pill">EOA -</span>
+        <span id="smartAccountPill" class="pill">Smart -</span>
+        <span id="networkPill" class="pill">Local</span>
+        <span id="testModePill" class="pill test-mode-pill hidden">TEST MODE (no STARK proofs)</span>
+        <span id="supplyCount" class="pill supply-pill">0 / 13 minted</span>
+      </section>
+
+      <section class="preview-section">
+        <div class="preview-card">
+          <div class="preview-label">Live Preview</div>
+          <div id="previewArt" class="preview-art">
+            <div class="preview-placeholder">Scroll to generate and select a Phil</div>
+          </div>
+          <div id="previewMeta" class="preview-meta"></div>
+        </div>
+
+        <div class="selection-card">
+          <h2 class="selector-title">Selection</h2>
+          <div id="selectionStatus" class="selection-status">Scroll to generate. Click a Phil to select it.</div>
+          <div id="selectedTraits" class="selected-traits"></div>
+        </div>
+      </section>
+
+      <section class="gallery-section">
+        <div id="gallery" class="gallery"></div>
+        <div id="sentinel" class="sentinel">Scroll for more generations...</div>
+      </section>
+
+      <button id="mintBtn" class="btn mint-btn hidden" disabled>Mint</button>
+
+      <section id="mintStatus" class="mint-status hidden">
+        <div class="status-card">
+          <div id="mintSteps" class="status-steps"></div>
+        </div>
+      </section>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="advanced-inner">
+          <div class="selector-group security-panel">
+            <h3 class="selector-title">Security Tools</h3>
+            <div class="security-row">
+              <span class="security-label">Paymaster</span>
+              <label class="toggle-row">
+                <input id="usePaymasterToggle" type="checkbox" checked />
+                <span>Sponsor gas</span>
+              </label>
+            </div>
+            <div class="security-row">
+              <span class="security-label">Smart Account</span>
+              <span id="smartAccountStatus" class="security-value">Not ready</span>
+            </div>
+            <div class="security-row">
+              <span class="security-label">Owner Count</span>
+              <span id="ownerCount" class="security-value">-</span>
+            </div>
+            <div class="security-row">
+              <span class="security-label">Unlock Inbox</span>
+              <span id="unlockInboxStatus" class="security-value">-</span>
+            </div>
+
+            <div class="scope-grid">
+              <label><input type="checkbox" data-scope="TRANSFER_PHIL" /> Transfer Phil</label>
+              <label><input type="checkbox" data-scope="LIST_PHIL" /> List Phil</label>
+              <label><input type="checkbox" data-scope="ACCEPT_BID" /> Accept Bid</label>
+              <label><input type="checkbox" data-scope="SET_APPROVAL_FOR_ALL" /> Set Approval</label>
+              <label><input type="checkbox" data-scope="LARGE_SPEND" /> Large Spend</label>
+              <label><input type="checkbox" data-scope="OWNER_CHANGE" /> Owner Change</label>
+              <label><input type="checkbox" data-scope="UPGRADE_WALLET" /> Upgrade</label>
+              <label><input type="checkbox" data-scope="ROTATE_2FA_ROOT" /> Rotate 2FA</label>
+            </div>
+
+            <button id="applyScopesBtn" class="btn subtle">Apply STARK Scopes</button>
+
+            <div class="owner-add">
+              <input id="newOwnerInput" type="text" placeholder="Add owner address (0x...)" />
+              <button id="addOwnerBtn" class="btn subtle">Add Owner</button>
+            </div>
+
+            <div class="unlock-actions">
+              <input id="validMinutesInput" type="number" min="1" value="10" />
+              <span class="unlock-label">minutes unlock</span>
+              <input id="constraintsHashInput" type="text" placeholder="constraintsHash (optional)" />
+            </div>
+
+            <div class="unlock-actions action-row">
+              <button id="buildUnlockBtn" class="btn ghost">Build Unlock Payload</button>
+              <button id="refreshTicketBtn" class="btn ghost">Refresh Ticket</button>
+            </div>
+
+            <pre id="unlockPayload" class="unlock-payload hidden"></pre>
+            <div id="ticketStatus" class="ticket-status">No ticket</div>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <script type="module" src="mint.js"></script>
+  </body>
+</html>
