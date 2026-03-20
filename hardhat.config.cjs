@@ -1,28 +1,140 @@
 require('dotenv').config();
+require('@nomicfoundation/hardhat-verify');
+
+const networks = {
+  hardhat: {
+    chainId: 31337,
+    blockGasLimit: 120000000
+  },
+  localhost: {
+    url: "http://127.0.0.1:8545"
+  }
+};
+
+const sepoliaUrl = String(process.env.RPC_URL_SEPOLIA || '').trim();
+const privateKey = String(process.env.PRIVATE_KEY || '').trim();
+const hasValidPrivateKey = /^(0x)?[0-9a-fA-F]{64}$/.test(privateKey);
+if (sepoliaUrl) {
+  networks.sepolia = {
+    url: sepoliaUrl,
+    accounts: hasValidPrivateKey ? [privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`] : []
+  };
+}
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: "0.8.24",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200
+    compilers: [
+      {
+        version: "0.8.24",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
       },
-      viaIR: true
+      {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      }
+    ],
+    overrides: {
+      "contracts/PhilSVGStorage.sol": {
+        version: "0.8.24",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilMarketplace.sol": {
+        version: "0.8.24",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilLayerRegistry.sol": {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilNFT.sol": {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilRenderer.sol": {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilIdentityGate.sol": {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilIdentityMint.sol": {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      },
+      "contracts/PhilWeb3.sol": {
+        version: "0.8.26",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200
+          },
+          viaIR: true
+        }
+      }
     }
   },
   paths: {
     sources: "./contracts",
     artifacts: "./artifacts"
   },
-  networks: {
-    hardhat: {
-      chainId: 31337,
-      blockGasLimit: 120000000
-    },
-    localhost: {
-      url: "http://127.0.0.1:8545"
-    }
+  networks,
+  etherscan: {
+    apiKey: String(process.env.ETHERSCAN_API_KEY || '').trim()
   }
 };

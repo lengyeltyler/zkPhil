@@ -17,12 +17,22 @@ interface IPhilUnlockInbox {
     function getTicket(address vault) external view returns (Ticket memory);
 }
 
-interface IPhilAccountProofVerifier {
-    function consumeExecutionProof(
+interface IPhilIdentityMintConfig {
+    function gate() external view returns (address);
+}
+
+interface IProofGateConfig {
+    function PROGRAM_HASH() external view returns (bytes32);
+    function CONTEXT_ID() external view returns (uint256);
+    function eligibilityRoot() external view returns (uint256);
+    function computeExpectedFactHash(
         address recipient,
-        bytes32 actionHash,
-        IProofGate.MintProof calldata proof
-    ) external;
+        bytes32 claimHash,
+        uint256 nullifier,
+        uint256 credentialSlot,
+        uint256 credentialLeaf,
+        uint8 claimKind
+    ) external view returns (bytes32);
 }
 
 /// @title PhilAccount
@@ -30,6 +40,12 @@ interface IPhilAccountProofVerifier {
 /// @dev Single-signature owner auth, but blocks transfer/trading until 2 owners are set.
 contract PhilAccount is ERC4337 {
     address internal constant LOCAL_ENTRY_POINT_V07 = 0x1000000000000000000000000000000000000001;
+    bytes4 private constant EXECUTE_SELECTOR = bytes4(keccak256("execute(address,uint256,bytes)"));
+    bytes4 private constant MINT_SELECTOR = bytes4(
+        keccak256(
+            "mint(address,address,uint8,uint8,uint8,uint32,(uint256,bytes32,bytes))"
+        )
+    );
     // ─────────────────────────────────────────────────────────────
     // Scope bitmask (matches PHILVAULT.md)
     // ─────────────────────────────────────────────────────────────
@@ -53,8 +69,10 @@ contract PhilAccount is ERC4337 {
     uint32 public ownerCount;
 
     address public unlockInbox;
-    address public philTestMint;
+    address public philIdentityMint;
+    // Legacy proof-verifier slot kept for storage compatibility; local eligibility mode leaves this unset.
     address public proofVerifier;
+    uint64 public lastExecutionApprovalNonce;
     uint32 public starkScopeMask;
     uint256 public largeSpendWei;
     mapping(bytes32 => bool) public approvedActionHash;
@@ -70,7 +88,12 @@ contract PhilAccount is ERC4337 {
     error InvalidUnlockTicket();
     error BadCallData();
     error ProofRequired();
-    error InvalidProofVerifier();
+    error UnlockInboxNotSet();
+    error NoFreshUnlockTicket();
+    error UnlockTicketNotYetValid();
+    error UnlockTicketExpired();
+    error UnlockTicketConstraintsMismatch();
+    error BackendExecutionProofDisabled();
 
     // ─────────────────────────────────────────────────────────────
     // Events
@@ -82,8 +105,8 @@ contract PhilAccount is ERC4337 {
     event ProofVerifierUpdated(address indexed verifier);
     event StarkScopeMaskUpdated(uint32 mask);
     event LargeSpendUpdated(uint256 amountWei);
-    event ExecutionProofSubmitted(address indexed recipient, bytes32 indexed actionHash, bytes32 indexed factHash);
-    event ExecutionProofConsumed(address indexed recipient, bytes32 indexed actionHash);
+    event ExecutionArmedWithUnlock(address indexed recipient, bytes32 indexed actionHash, uint64 ticketNonce);
+    event ExecutionApprovalConsumed(address indexed recipient, bytes32 indexed actionHash);
 
     // ─────────────────────────────────────────────────────────────
     // Initialization
@@ -99,16 +122,15 @@ contract PhilAccount is ERC4337 {
     }
 
     /// @dev One-time config for vault parameters (called by factory).
-    function initVaultConfig(address unlockInbox_, address philTestMint_, address proofVerifier_) external {
+    function initVaultConfig(address unlockInbox_, address philIdentityMint_, address) external {
         require(unlockInbox == address(0), "Vault config already set");
         require(unlockInbox_ != address(0), "Invalid inbox");
-        require(philTestMint_ != address(0), "Invalid mint");
-        if (proofVerifier_ == address(0)) revert InvalidProofVerifier();
+        require(philIdentityMint_ != address(0), "Invalid mint");
         unlockInbox = unlockInbox_;
-        philTestMint = philTestMint_;
-        proofVerifier = proofVerifier_;
+        philIdentityMint = philIdentityMint_;
+        proofVerifier = address(0);
         emit UnlockInboxUpdated(unlockInbox_);
-        emit ProofVerifierUpdated(proofVerifier_);
+        emit ProofVerifierUpdated(address(0));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -165,41 +187,50 @@ contract PhilAccount is ERC4337 {
         emit UnlockInboxUpdated(inbox);
     }
 
-    function setProofVerifier(address verifier) external onlyVaultOwner {
-        _requireUnlockForSelf(S_OWNER_CHANGE);
-        if (verifier == address(0)) revert InvalidProofVerifier();
-        proofVerifier = verifier;
-        emit ProofVerifierUpdated(verifier);
+    function setProofVerifier(address) external pure {
+        revert BackendExecutionProofDisabled();
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Proof-as-2FA
-    // ─────────────────────────────────────────────────────────────
-
+    /// @notice Legacy backend execution-proof arming is permanently disabled.
     function submitExecutionProof(
+        address,
+        address,
+        uint256,
+        bytes calldata,
+        IProofGate.MintProof calldata
+    ) external pure {
+        revert BackendExecutionProofDisabled();
+    }
+
+    /// @notice Legacy backend batch execution-proof arming is permanently disabled.
+    function submitExecutionBatchProof(
+        address,
+        Call[] calldata,
+        IProofGate.MintProof calldata
+    ) external pure {
+        revert BackendExecutionProofDisabled();
+    }
+
+    function approveExecutionWithUnlock(
         address recipient,
         address target,
         uint256 value,
-        bytes calldata data,
-        IProofGate.MintProof calldata proof
+        bytes calldata data
     ) external onlyVaultOwner {
-        if (proofVerifier == address(0)) revert InvalidProofVerifier();
         bytes32 actionHash = computeExecuteActionHash(recipient, target, value, data);
-        IPhilAccountProofVerifier(proofVerifier).consumeExecutionProof(recipient, actionHash, proof);
+        _requireAndConsumeFreshUnlockTicket(_constraintsHash(target, value, data));
         approvedActionHash[actionHash] = true;
-        emit ExecutionProofSubmitted(recipient, actionHash, proof.factHash);
+        emit ExecutionArmedWithUnlock(recipient, actionHash, lastExecutionApprovalNonce);
     }
 
-    function submitExecutionBatchProof(
+    function approveExecutionBatchWithUnlock(
         address recipient,
-        Call[] calldata calls,
-        IProofGate.MintProof calldata proof
+        Call[] calldata calls
     ) external onlyVaultOwner {
-        if (proofVerifier == address(0)) revert InvalidProofVerifier();
         bytes32 actionHash = computeExecuteBatchActionHash(recipient, calls);
-        IPhilAccountProofVerifier(proofVerifier).consumeExecutionProof(recipient, actionHash, proof);
+        _requireAndConsumeFreshUnlockTicket(_batchConstraintsHash(calls));
         approvedActionHash[actionHash] = true;
-        emit ExecutionProofSubmitted(recipient, actionHash, proof.factHash);
+        emit ExecutionArmedWithUnlock(recipient, actionHash, lastExecutionApprovalNonce);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -215,6 +246,7 @@ contract PhilAccount is ERC4337 {
         if (!isOwner[recovered]) return 1;
 
         _enforceUserOpPolicy(userOp);
+        _maybeAutoApproveMintAction(userOp, recovered);
         return 0;
     }
 
@@ -241,7 +273,7 @@ contract PhilAccount is ERC4337 {
         bytes32 actionHash = computeExecuteActionHash(msg.sender, target, value, data);
         if (!approvedActionHash[actionHash]) revert ProofRequired();
         delete approvedActionHash[actionHash];
-        emit ExecutionProofConsumed(msg.sender, actionHash);
+        emit ExecutionApprovalConsumed(msg.sender, actionHash);
 
         _enforcePolicy(target, value, data, _getTicket());
         return super.execute(target, value, data);
@@ -257,7 +289,7 @@ contract PhilAccount is ERC4337 {
         bytes32 actionHash = computeExecuteBatchActionHash(msg.sender, calls);
         if (!approvedActionHash[actionHash]) revert ProofRequired();
         delete approvedActionHash[actionHash];
-        emit ExecutionProofConsumed(msg.sender, actionHash);
+        emit ExecutionApprovalConsumed(msg.sender, actionHash);
 
         IPhilUnlockInbox.Ticket memory ticket = _getTicket();
         for (uint256 i = 0; i < calls.length; i++) {
@@ -276,7 +308,7 @@ contract PhilAccount is ERC4337 {
 
         IPhilUnlockInbox.Ticket memory ticket = _getTicket();
 
-        if (selector == bytes4(keccak256("execute(address,uint256,bytes)"))) {
+        if (selector == EXECUTE_SELECTOR) {
             (address target, uint256 value, bytes memory data) = abi.decode(
                 userOp.callData[4:], (address, uint256, bytes)
             );
@@ -293,6 +325,117 @@ contract PhilAccount is ERC4337 {
         }
 
         revert BadCallData();
+    }
+
+    function _maybeAutoApproveMintAction(
+        PackedUserOperation calldata userOp,
+        address owner
+    ) internal {
+        if (msg.sender != entryPoint() || philIdentityMint == address(0)) return;
+
+        bytes calldata callData = userOp.callData;
+        if (callData.length < 4 + 32 * 4) return;
+        if (bytes4(callData[0:4]) != EXECUTE_SELECTOR) return;
+
+        address target = address(uint160(uint256(bytes32(callData[4:36]))));
+        uint256 value = uint256(bytes32(callData[36:68]));
+        if (target != philIdentityMint || value != 0) return;
+
+        uint256 dataOffset = uint256(bytes32(callData[68:100]));
+        uint256 dataLengthPos = 4 + dataOffset;
+        if (callData.length < dataLengthPos + 32) return;
+
+        uint256 innerLength = uint256(bytes32(callData[dataLengthPos:dataLengthPos + 32]));
+        uint256 innerStart = dataLengthPos + 32;
+        if (callData.length < innerStart + innerLength) return;
+
+        bytes calldata innerData = callData[innerStart:innerStart + innerLength];
+        if (!_isValidAutoApprovedMint(owner, innerData)) return;
+
+        approvedActionHash[_computeExecuteActionHashCalldata(msg.sender, target, value, innerData)] = true;
+    }
+
+    function _isValidAutoApprovedMint(
+        address owner,
+        bytes calldata innerData
+    ) internal view returns (bool) {
+        if (innerData.length < 4 + 32 * 7) return false;
+        if (bytes4(innerData[0:4]) != MINT_SELECTOR) return false;
+
+        (
+            address recipient,
+            address mintTo,
+            uint8 philId,
+            uint8 paletteVariant,
+            uint8 mixMode,
+            uint32 mixSeed,
+            IProofGate.MintProof memory proof
+        ) = abi.decode(
+            innerData[4:],
+            (address, address, uint8, uint8, uint8, uint32, IProofGate.MintProof)
+        );
+
+        if (recipient != owner) return false;
+        if (mintTo != address(this)) return false;
+        if (proof.expiry != 0 && block.timestamp > proof.expiry) return false;
+
+        address gate;
+        try IPhilIdentityMintConfig(philIdentityMint).gate() returns (address resolvedGate) {
+            gate = resolvedGate;
+        } catch {
+            return false;
+        }
+        if (gate == address(0)) return false;
+
+        bytes32 programHash;
+        uint256 contextId;
+        try IProofGateConfig(gate).PROGRAM_HASH() returns (bytes32 value) {
+            programHash = value;
+        } catch {
+            return false;
+        }
+        try IProofGateConfig(gate).CONTEXT_ID() returns (uint256 value) {
+            contextId = value;
+        } catch {
+            return false;
+        }
+        bytes32 claimHash = keccak256(
+            abi.encode(
+                programHash,
+                contextId,
+                block.chainid,
+                gate,
+                recipient,
+                mintTo,
+                philId,
+                paletteVariant,
+                mixMode,
+                mixSeed,
+                proof.expiry
+            )
+        );
+        if (proof.signature.length != 96) return false;
+
+        (uint256 nullifier, uint256 credentialSlot, uint256 credentialLeaf) = abi.decode(
+            proof.signature,
+            (uint256, uint256, uint256)
+        );
+
+        bytes32 expectedFactHash;
+        try IProofGateConfig(gate).computeExpectedFactHash(
+            recipient,
+            claimHash,
+            nullifier,
+            credentialSlot,
+            credentialLeaf,
+            1
+        ) returns (bytes32 value) {
+            expectedFactHash = value;
+        } catch {
+            return false;
+        }
+
+        return expectedFactHash == proof.factHash;
     }
 
     function _enforcePolicy(
@@ -335,21 +478,27 @@ contract PhilAccount is ERC4337 {
         }
     }
 
+    function _requireAndConsumeFreshUnlockTicket(bytes32 expectedConstraintsHash) internal {
+        if (unlockInbox == address(0)) revert UnlockInboxNotSet();
+
+        IPhilUnlockInbox.Ticket memory ticket = _getTicket();
+        if (ticket.nonce <= lastExecutionApprovalNonce) revert NoFreshUnlockTicket();
+
+        uint256 nowTs = block.timestamp;
+        if (ticket.validAfter != 0 && nowTs < ticket.validAfter) revert UnlockTicketNotYetValid();
+        if (ticket.validUntil != 0 && nowTs > ticket.validUntil) revert UnlockTicketExpired();
+        if (ticket.constraintsHash != expectedConstraintsHash) revert UnlockTicketConstraintsMismatch();
+
+        lastExecutionApprovalNonce = ticket.nonce;
+    }
+
     function computeExecuteActionHash(
         address recipient,
         address target,
         uint256 value,
         bytes calldata data
     ) public view returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                address(this),
-                recipient,
-                target,
-                value,
-                keccak256(data)
-            )
-        );
+        return _computeExecuteActionHashCalldata(recipient, target, value, data);
     }
 
     function computeExecuteBatchActionHash(
@@ -363,6 +512,10 @@ contract PhilAccount is ERC4337 {
                 keccak256(abi.encode(calls))
             )
         );
+    }
+
+    function _batchConstraintsHash(Call[] calldata calls) internal pure returns (bytes32) {
+        return keccak256(abi.encode(calls));
     }
 
     function _constraintsHash(
@@ -417,7 +570,7 @@ contract PhilAccount is ERC4337 {
         }
 
         // Phil marketplace actions
-        if (target == philTestMint) {
+        if (target == philIdentityMint) {
             if (
                 selector == bytes4(keccak256("offerForSale(uint256,uint256)")) ||
                 selector == bytes4(keccak256("offerForSaleToAddress(uint256,uint256,address)")) ||
@@ -450,6 +603,40 @@ contract PhilAccount is ERC4337 {
         }
 
         return 0;
+    }
+
+    function _computeExecuteActionHashMemory(
+        address recipient,
+        address target,
+        uint256 value,
+        bytes memory data
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                address(this),
+                recipient,
+                target,
+                value,
+                keccak256(data)
+            )
+        );
+    }
+
+    function _computeExecuteActionHashCalldata(
+        address recipient,
+        address target,
+        uint256 value,
+        bytes calldata data
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                address(this),
+                recipient,
+                target,
+                value,
+                keccak256(data)
+            )
+        );
     }
 
     function _getTicket() internal view returns (IPhilUnlockInbox.Ticket memory) {

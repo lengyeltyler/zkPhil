@@ -1,50 +1,37 @@
-/// Phil Test13 Allowlist STARK Proof Program
+/// Phil local-claim STARK proof program.
 ///
-/// This Cairo program proves:
-/// 1. The prover knows a `secret` whose leaf exists in the allowlist Merkle tree
-/// 2. The `nullifier` is correctly derived to prevent replay attacks
-/// 3. The proof is bound to a specific `recipient` and `drop_id`
-///
-/// Outputs 6 felts for verification on Ethereum:
-/// [0] root - Merkle root of allowlist (verified against contract)
-/// [1] drop_id - Unique identifier for this drop (verified against contract)
-/// [2] recipient - Address receiving the NFT (verified against mint params)
-/// [3] nullifier - Prevents replay (burned on mint)
-/// [4] leaf - Debug: computed leaf hash
-/// [5] idx - Debug: leaf index in tree
+/// Outputs nine felts:
+/// [0] eligibility_root
+/// [1] context_id
+/// [2] recipient
+/// [3] claim_hash_hi
+/// [4] claim_hash_lo
+/// [5] nullifier
+/// [6] credential_slot
+/// [7] credential_leaf
+/// [8] claim_kind
 
-pub mod allowlist;
+pub mod eligibility;
 
-use allowlist::{verify_allowlist, MerkleProof};
-use core::traits::TryInto;
+use eligibility::{MerkleProof, verify_eligibility_claim};
 use core::array::ArrayTrait;
+use core::traits::TryInto;
 
 fn input_at(input: @Array<felt252>, idx: usize) -> felt252 {
     assert(idx < input.len(), 'Input underflow');
     *input.at(idx)
 }
 
-/// Main function - entry point for Atlantic execution
-///
-/// Input format (Atlantic Cairo 1):
-/// A single Array<felt252> with this layout:
-/// [ secret,
-///   siblings_len, siblings...,
-///   path_len, path_indices...,
-///   root, drop_id, recipient ]
-///
-/// Output: Array of 6 felt252 values
 #[executable]
-fn main(
-    input: Array<felt252>,
-) -> Array<felt252> {
+fn main(input: Array<felt252>) -> Array<felt252> {
     let mut i: usize = 0;
 
-    // secret
     let secret = input_at(@input, i);
     i += 1;
 
-    // siblings
+    let credential_slot = input_at(@input, i);
+    i += 1;
+
     let siblings_len_felt = input_at(@input, i);
     i += 1;
     let siblings_len: usize = siblings_len_felt.try_into().unwrap();
@@ -56,7 +43,6 @@ fn main(
         s_idx += 1;
     };
 
-    // path indices
     let path_len_felt = input_at(@input, i);
     i += 1;
     let path_len: usize = path_len_felt.try_into().unwrap();
@@ -68,16 +54,28 @@ fn main(
         p_idx += 1;
     };
 
-    // root, drop_id, recipient
-    let root = input_at(@input, i);
+    let eligibility_root = input_at(@input, i);
     i += 1;
-    let drop_id = input_at(@input, i);
+    let context_id = input_at(@input, i);
     i += 1;
     let recipient = input_at(@input, i);
+    i += 1;
+    let claim_hash_hi = input_at(@input, i);
+    i += 1;
+    let claim_hash_lo = input_at(@input, i);
+    i += 1;
+    let claim_kind = input_at(@input, i);
 
-    // Build MerkleProof struct
     let proof = MerkleProof { siblings, path_indices };
-
-    // Verify and return outputs
-    verify_allowlist(secret, proof, root, drop_id, recipient)
+    verify_eligibility_claim(
+        secret,
+        credential_slot,
+        proof,
+        eligibility_root,
+        context_id,
+        recipient,
+        claim_hash_hi,
+        claim_hash_lo,
+        claim_kind,
+    )
 }

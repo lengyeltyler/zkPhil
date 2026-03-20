@@ -3,16 +3,20 @@ pragma solidity ^0.8.24;
 
 import {ECDSA} from "solady/src/utils/ECDSA.sol";
 import {Ownable} from "solady/src/auth/Ownable.sol";
+import {IProofGate} from "./IProofGate.sol";
 
 /// @title PhilPaymaster
 /// @notice ERC-4337 v0.7.0 Verifying Paymaster for sponsoring Phil NFT mints
 /// @dev Validates a backend-signed sponsorship approval per UserOp.
-///      Only sponsors calls to the PhilTestMint contract.
+///      Only sponsors calls to the PhilIdentityMint contract.
 ///
-///      paymasterAndData layout (after the 20-byte paymaster address):
-///        [0:16]   validUntil  (uint128, big-endian)
-///        [16:32]  validAfter  (uint128, big-endian)
-///        [32:97]  signature   (65 bytes, ECDSA)
+///      The off-chain UserOperation encodes paymasterAndData as:
+///        paymaster (20) || paymasterValidationGasLimit (16) || paymasterPostOpGasLimit (16)
+///        || validUntil (16) || validAfter (16) || signature (65)
+///
+///      EntryPoint v0.7 strips the 32-byte paymaster gas-limit prefix before calling
+///      validatePaymasterUserOp, so the paymaster observes:
+///        paymaster (20) || validUntil (16) || validAfter (16) || signature (65)
 contract PhilPaymaster is Ownable {
     // ─────────────────────────────────────────────────────────────
     // ERC-4337 v0.7.0 Structs
@@ -46,12 +50,14 @@ contract PhilPaymaster is Ownable {
     /// @notice Address that signs sponsorship approvals
     address public immutable verifyingSigner;
 
-    /// @notice Only sponsor mints to this contract
-    address public immutable philTestMint;
+    /// @notice Only sponsor identity issuance calls to this contract
+    address public immutable philIdentityMint;
 
     bytes4 private constant EXECUTE_SELECTOR = bytes4(keccak256("execute(address,uint256,bytes)"));
     bytes4 private constant MINT_SELECTOR = bytes4(
-        keccak256("mint(address,address,uint8,uint8,uint8,uint8,uint8,uint8,bytes32,uint256[6])")
+        keccak256(
+            "mint(address,address,uint8,uint8,uint8,uint32,(uint256,bytes32,bytes))"
+        )
     );
 
     // ─────────────────────────────────────────────────────────────
@@ -67,16 +73,16 @@ contract PhilPaymaster is Ownable {
 
     /// @param entryPoint_ The EntryPoint v0.7.0 address
     /// @param verifyingSigner_ The backend signer for sponsorship approvals
-    /// @param philTestMint_ The PhilTestMint contract to restrict sponsorship to
+    /// @param philIdentityMint_ The PhilIdentityMint contract to restrict sponsorship to
     constructor(
         address entryPoint_,
         address verifyingSigner_,
-        address philTestMint_
+        address philIdentityMint_
     ) payable {
         _initializeOwner(msg.sender);
         entryPoint = entryPoint_;
         verifyingSigner = verifyingSigner_;
-        philTestMint = philTestMint_;
+        philIdentityMint = philIdentityMint_;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -92,9 +98,9 @@ contract PhilPaymaster is Ownable {
     ) external view returns (bytes memory context, uint256 validationData) {
         if (msg.sender != entryPoint) revert OnlyEntryPoint();
 
-        // Decode paymaster-specific data (after the 20-byte paymaster address)
+        // Decode paymaster-specific data after EntryPoint strips the paymaster gas limits.
         bytes calldata pmData = userOp.paymasterAndData[20:];
-        if (pmData.length < 97) revert InvalidPaymasterData();
+        if (pmData.length != 97) revert InvalidPaymasterData();
 
         uint128 validUntil = uint128(bytes16(pmData[0:16]));
         uint128 validAfter = uint128(bytes16(pmData[16:32]));
@@ -189,7 +195,7 @@ contract PhilPaymaster is Ownable {
 
         address target = address(uint160(uint256(bytes32(callData[4:36]))));
         uint256 value = uint256(bytes32(callData[36:68]));
-        if (target != philTestMint) return 3;
+        if (target != philIdentityMint) return 3;
         if (value != 0) return 4;
 
         uint256 dataOffset = uint256(bytes32(callData[68:100]));
@@ -199,14 +205,32 @@ contract PhilPaymaster is Ownable {
         uint256 innerLength = uint256(bytes32(callData[dataLengthPos:dataLengthPos + 32]));
         uint256 innerStart = dataLengthPos + 32;
         if (callData.length < innerStart + innerLength) return 1;
-        if (innerLength != 4 + 32 * 15) return 5;
 
-        if (bytes4(callData[innerStart:innerStart + 4]) != MINT_SELECTOR) return 6;
+        bytes calldata innerData = callData[innerStart:innerStart + innerLength];
+        if (innerData.length < 4 + 32 * 7) return 5;
+        if (bytes4(innerData[0:4]) != MINT_SELECTOR) return 6;
 
-        address recipient = address(uint160(uint256(bytes32(callData[innerStart + 4:innerStart + 36]))));
-        address mintTo = address(uint160(uint256(bytes32(callData[innerStart + 36:innerStart + 68]))));
+        (
+            address recipient,
+            address mintTo,
+            uint8 philId,
+            uint8 paletteVariant,
+            uint8 mixMode,
+            uint32 mixSeed,
+            IProofGate.MintProof memory proof
+        ) = abi.decode(
+            innerData[4:],
+            (address, address, uint8, uint8, uint8, uint32, IProofGate.MintProof)
+        );
+        philId;
+        paletteVariant;
+        mixMode;
+        mixSeed;
         if (recipient == address(0)) return 7;
         if (mintTo != userOp.sender) return 8;
+        if (proof.factHash == bytes32(0)) return 9;
+        if (proof.signature.length != 96) return 10;
+        if (proof.expiry != 0 && proof.expiry < block.timestamp) return 11;
 
         return 0;
     }

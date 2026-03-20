@@ -1,59 +1,87 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {SSTORE2} from "solady/src/utils/SSTORE2.sol";
-import {LibString} from "solady/src/utils/LibString.sol";
 import {Base64} from "solady/src/utils/Base64.sol";
+import {LibString} from "solady/src/utils/LibString.sol";
 
-import {PhilDSLDecoder} from "./PhilDSLDecoder.sol";
+interface IPhilLayerRegistry {
+    function layerCount() external view returns (uint256);
 
-interface IPhilFragments {
-    function fragmentRange(uint8 philId, uint8 slot)
+    function getLayer(uint16 layerId)
         external
         view
-        returns (uint16 start, uint16 end, bool isDsl);
+        returns (
+            string memory name,
+            uint8 stackIndex,
+            uint8 minSelections,
+            uint8 maxSelections
+        );
 
-    function chunkPtr(uint16 chunkIndex) external view returns (address);
+    function getAsset(uint32 assetId)
+        external
+        view
+        returns (
+            uint16 layerId,
+            uint256 storageId,
+            string memory sublayer,
+            string memory fileName
+        );
+
+    function getVariant(uint32 variantId)
+        external
+        view
+        returns (
+            uint16 layerId,
+            string memory label,
+            string memory style,
+            string memory color
+        );
+
+    function getLayerVariantIds(uint16 layerId) external view returns (uint32[] memory);
+
+    function getVariantAssetIds(uint32 variantId) external view returns (uint32[] memory);
 }
 
-interface IPhilPalettes {
-    function palettePointer(uint8 philId) external view returns (address);
-
-    function slotCount(uint8 philId) external view returns (uint8);
+interface IPhilSVGStorage {
+    function readSvgBytes(uint256 svgId) external view returns (bytes memory);
 }
 
-/// @notice Fragment route renderer: assembles per-phil fragments + palette mapping + optional DSL decode.
+/// @notice Compatibility renderer for the legacy Phil stack.
+/// @dev Preserves the old renderer interface while sourcing art from zkPhilLayers via
+/// `PhilLayerRegistry` + `PhilSVGStorage`.
 contract PhilRenderer {
     using LibString for uint256;
 
     uint8 private constant PHIL_COUNT = 6;
-    uint8 private constant SLOT_COUNT = 11;
     uint8 private constant PALETTE_COUNT = 9;
-
     uint8 private constant MIX_MODE_NONE = 0;
     uint8 private constant MIX_MODE_SWAP = 1;
     uint8 private constant MIX_MODE_PERMUTE = 2;
-    uint32 private constant GOLDEN_MIX_SEED = 0x9e3779b9;
+    uint8 private constant MAX_LAYER_COUNT = 13;
+    uint8 private constant MAX_SELECTIONS_PER_LAYER = 3;
+    uint16 private constant BODY_LAYER_ID = 5;
+    uint16 private constant BODY_BASE_LAYER_ID = 6;
+    bytes32 private constant BODY_BASE_LAYER_HASH = keccak256("BodyBase");
 
-    IPhilFragments public immutable fragments;
-    IPhilPalettes public immutable palettes;
+    IPhilLayerRegistry public immutable layerRegistry;
+    IPhilSVGStorage public immutable svgStorage;
 
     address public owner;
     address public gateway;
-    bool public compactTokenURI = true;
+    bool public compactTokenURI;
 
     error BadPhilId();
-    error BadPaletteVariant();
     error BadMixMode();
+    error BadPaletteVariant();
+    error CompactTokenURIDisabled();
+    error LayerCountMismatch(uint256 expectedCount, uint256 actualCount);
     error NotOwner();
-    error InvalidPalettePointer();
-    error InvalidPaletteData();
 
-    constructor(address fragments_, address palettes_, address gateway_) {
-        require(fragments_ != address(0), "fragments=0");
-        require(palettes_ != address(0), "palettes=0");
-        fragments = IPhilFragments(fragments_);
-        palettes = IPhilPalettes(palettes_);
+    constructor(address layerRegistry_, address svgStorage_, address gateway_) {
+        require(layerRegistry_ != address(0), "layerRegistry=0");
+        require(svgStorage_ != address(0), "svgStorage=0");
+        layerRegistry = IPhilLayerRegistry(layerRegistry_);
+        svgStorage = IPhilSVGStorage(svgStorage_);
         gateway = gateway_;
         owner = msg.sender;
     }
@@ -73,6 +101,7 @@ contract PhilRenderer {
     }
 
     function setCompactTokenURI(bool enabled) external onlyOwner {
+        if (enabled) revert CompactTokenURIDisabled();
         compactTokenURI = enabled;
     }
 
@@ -81,47 +110,46 @@ contract PhilRenderer {
         view
         returns (string memory)
     {
-        if (philId >= PHIL_COUNT) revert BadPhilId();
-        if (paletteVariant >= PALETTE_COUNT) revert BadPaletteVariant();
-        if (mixMode > MIX_MODE_PERMUTE) revert BadMixMode();
+        _validateInputs(philId, paletteVariant, mixMode);
 
-        uint8 slotCount = palettes.slotCount(philId);
-        address palettePointer = palettes.palettePointer(philId);
-        if (palettePointer == address(0)) revert InvalidPalettePointer();
-
-        bytes memory paletteData = SSTORE2.read(palettePointer);
-        uint256 expectedPaletteBytes = uint256(slotCount) * uint256(PALETTE_COUNT) * 3;
-        if (paletteData.length < expectedPaletteBytes) revert InvalidPaletteData();
-
-        uint8[] memory mixedOrder = _buildMixedOrder(slotCount, mixMode, mixSeed);
-        bytes[] memory segments = new bytes[](SLOT_COUNT + 2);
-        uint256 segmentCount;
-        segments[segmentCount++] =
-            bytes('<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420">');
-
-        for (uint8 slot = 0; slot < SLOT_COUNT; slot++) {
-            (bytes memory fragmentData, bool isDsl) = _fragmentData(philId, slot);
-            if (fragmentData.length == 0) continue;
-
-            bytes memory materialized = fragmentData;
-            if (isDsl) {
-                materialized = bytes(PhilDSLDecoder.decode(fragmentData));
-            }
-
-            string memory renderedFragment = _applyPalette(
-                materialized,
-                paletteData,
-                slotCount,
-                paletteVariant,
-                mixedOrder
-            );
-            bytes memory fragmentBytes = bytes(renderedFragment);
-            if (fragmentBytes.length == 0) continue;
-            segments[segmentCount++] = fragmentBytes;
+        uint256 layerCount = layerRegistry.layerCount();
+        if (layerCount != MAX_LAYER_COUNT) {
+            revert LayerCountMismatch(MAX_LAYER_COUNT, layerCount);
         }
 
-        segments[segmentCount++] = bytes("</svg>");
-        return string(_concatBytes(segments, segmentCount));
+        bytes32 seed = _baseSeed(philId, paletteVariant, mixMode, mixSeed);
+        bytes memory layersMarkup;
+
+        for (uint256 reverseIndex = layerCount; reverseIndex > 0; reverseIndex--) {
+            uint16 layerId = uint16(reverseIndex - 1);
+            (uint32[3] memory selectedVariantIds, uint8 selectionCount) =
+                _selectLayerVariants(seed, layerId);
+
+            for (uint256 selectionIndex = 0; selectionIndex < selectionCount; selectionIndex++) {
+                uint32[] memory assetIds = layerRegistry.getVariantAssetIds(selectedVariantIds[selectionIndex]);
+
+                for (uint256 assetIndex = 0; assetIndex < assetIds.length; assetIndex++) {
+                    (, uint256 storageId, , ) = layerRegistry.getAsset(assetIds[assetIndex]);
+                    bytes memory rawSvg = svgStorage.readSvgBytes(storageId);
+                    layersMarkup = abi.encodePacked(
+                        layersMarkup,
+                        '<image x="0" y="0" width="420" height="420" href="data:image/svg+xml;base64,',
+                        Base64.encode(rawSvg),
+                        '"/>'
+                    );
+                }
+            }
+        }
+
+        return string(
+            abi.encodePacked(
+                '<svg xmlns="http://www.w3.org/2000/svg" ',
+                'xmlns:xlink="http://www.w3.org/1999/xlink" ',
+                'width="420" height="420" viewBox="0 0 420 420">',
+                layersMarkup,
+                "</svg>"
+            )
+        );
     }
 
     function tokenURI(
@@ -131,51 +159,28 @@ contract PhilRenderer {
         uint8 mixMode,
         uint32 mixSeed
     ) external view returns (string memory) {
-        string memory image;
+        _validateInputs(philId, paletteVariant, mixMode);
 
-        if (compactTokenURI && gateway != address(0)) {
-            image = string(
-                abi.encodePacked(
-                    "web3://",
-                    uint256(uint160(gateway)).toHexString(20),
-                    "/svg/",
-                    uint256(philId).toString(),
-                    "/",
-                    uint256(paletteVariant).toString(),
-                    "/",
-                    uint256(mixMode).toString(),
-                    "/",
-                    uint256(mixSeed).toString()
-                )
-            );
-        } else {
-            string memory svg = renderSvg(philId, paletteVariant, mixMode, mixSeed);
-            image = string(
-                abi.encodePacked(
-                    "data:image/svg+xml;base64,",
-                    Base64.encode(bytes(svg))
-                )
-            );
-        }
+        string memory svg = renderSvg(philId, paletteVariant, mixMode, mixSeed);
+        string memory image = string(
+            abi.encodePacked("data:image/svg+xml;base64,", Base64.encode(bytes(svg)))
+        );
 
-        return string(
+        string memory metadata = string(
             abi.encodePacked(
-                "data:application/json;utf8,",
                 '{"name":"Phil #',
                 tokenId.toString(),
-                '","description":"Phil fragments renderer with on-chain palettes.",',
-                '"attributes":[{"trait_type":"Phil ID","value":"',
-                uint256(philId).toString(),
-                '"},{"trait_type":"Palette","value":"',
-                uint256(paletteVariant).toString(),
-                '"},{"trait_type":"Mix Mode","value":"',
-                uint256(mixMode).toString(),
-                '"},{"trait_type":"Mix Seed","value":"',
-                uint256(mixSeed).toString(),
-                '"}],"image":"',
+                '","description":"Phil legacy renderer backed by zkPhilLayers on-chain storage.",',
+                '"attributes":[',
+                _buildAttributes(philId, paletteVariant, mixMode, mixSeed),
+                '],"image":"',
                 image,
                 '"}'
             )
+        );
+
+        return string(
+            abi.encodePacked("data:application/json;base64,", Base64.encode(bytes(metadata)))
         );
     }
 
@@ -187,184 +192,210 @@ contract PhilRenderer {
         return keccak256(bytes(renderSvg(philId, paletteVariant, mixMode, mixSeed)));
     }
 
-    function _fragmentData(uint8 philId, uint8 slot)
+    function _buildAttributes(uint8 philId, uint8 paletteVariant, uint8 mixMode, uint32 mixSeed)
         internal
         view
-        returns (bytes memory out, bool isDsl)
+        returns (string memory attributes)
     {
-        (uint16 start, uint16 end, bool dsl) = fragments.fragmentRange(philId, slot);
-        if (end <= start) {
-            return (new bytes(0), dsl);
+        attributes = string(
+            abi.encodePacked(
+                '{"trait_type":"Phil ID","value":"',
+                uint256(philId).toString(),
+                '"},{"trait_type":"Palette","value":"',
+                uint256(paletteVariant).toString(),
+                '"},{"trait_type":"Mix Mode","value":"',
+                uint256(mixMode).toString(),
+                '"},{"trait_type":"Mix Seed","value":"',
+                uint256(mixSeed).toString(),
+                '"}'
+            )
+        );
+
+        bytes32 seed = _baseSeed(philId, paletteVariant, mixMode, mixSeed);
+        uint256 layerCount = layerRegistry.layerCount();
+
+        for (uint16 layerId = 0; layerId < layerCount; layerId++) {
+            (string memory layerName, , , ) = layerRegistry.getLayer(layerId);
+            string memory value = _selectionLabel(seed, layerId);
+            attributes = string(
+                abi.encodePacked(
+                    attributes,
+                    ',{"trait_type":"',
+                    layerName,
+                    '","value":"',
+                    value,
+                    '"}'
+                )
+            );
         }
-
-        uint256 count = uint256(end - start);
-        bytes[] memory parts = new bytes[](count);
-        uint256 total;
-
-        for (uint256 i = 0; i < count; i++) {
-            bytes memory chunk = SSTORE2.read(fragments.chunkPtr(uint16(uint256(start) + i)));
-            parts[i] = chunk;
-            total += chunk.length;
-        }
-
-        out = new bytes(total);
-        uint256 offset;
-        for (uint256 i = 0; i < count; i++) {
-            bytes memory part = parts[i];
-            for (uint256 j = 0; j < part.length; j++) {
-                out[offset + j] = part[j];
-            }
-            offset += part.length;
-        }
-
-        return (out, dsl);
     }
 
-    function _concatBytes(bytes[] memory parts, uint256 count)
+    function _selectionLabel(bytes32 seed, uint16 layerId) internal view returns (string memory value) {
+        (uint32[3] memory selectedVariantIds, uint8 selectionCount) = _selectLayerVariants(seed, layerId);
+        if (selectionCount == 0) {
+            return "None";
+        }
+
+        for (uint256 index = 0; index < selectionCount; index++) {
+            (, string memory label, , ) = layerRegistry.getVariant(selectedVariantIds[index]);
+            if (index == 0) {
+                value = label;
+            } else {
+                value = string(abi.encodePacked(value, " | ", label));
+            }
+        }
+    }
+
+    function _selectLayerVariants(bytes32 seed, uint16 layerId)
+        internal
+        view
+        returns (uint32[3] memory selectedVariantIds, uint8 selectionCount)
+    {
+        if (layerId == BODY_BASE_LAYER_ID && _isBodyBaseLayer()) {
+            return _selectBodyBaseVariants(seed);
+        }
+
+        return _selectLayerVariantsRaw(seed, layerId);
+    }
+
+    function _selectLayerVariantsRaw(bytes32 seed, uint16 layerId)
+        internal
+        view
+        returns (uint32[3] memory selectedVariantIds, uint8 selectionCount)
+    {
+        (, , uint8 minSelections, uint8 maxSelections) = layerRegistry.getLayer(layerId);
+        uint32[] memory layerVariants = layerRegistry.getLayerVariantIds(layerId);
+
+        if (layerVariants.length == 0 || maxSelections == 0) {
+            return (selectedVariantIds, 0);
+        }
+
+        bytes32 layerSeed = keccak256(abi.encodePacked(seed, layerId));
+        selectionCount = minSelections;
+
+        if (maxSelections > minSelections) {
+            selectionCount = uint8(
+                minSelections
+                    + (uint256(layerSeed) % (uint256(maxSelections) - uint256(minSelections) + 1))
+            );
+        }
+
+        if (selectionCount > layerVariants.length) {
+            selectionCount = uint8(layerVariants.length);
+        }
+
+        for (uint8 selectionIndex = 0; selectionIndex < selectionCount; selectionIndex++) {
+            uint256 variantCursor =
+                uint256(keccak256(abi.encodePacked(layerSeed, selectionIndex))) % layerVariants.length;
+            uint32 variantId = layerVariants[variantCursor];
+
+            while (_alreadySelected(selectedVariantIds, selectionIndex, variantId)) {
+                variantCursor = (variantCursor + 1) % layerVariants.length;
+                variantId = layerVariants[variantCursor];
+            }
+
+            selectedVariantIds[selectionIndex] = variantId;
+        }
+    }
+
+    function _selectBodyBaseVariants(bytes32 seed)
+        internal
+        view
+        returns (uint32[3] memory selectedVariantIds, uint8 selectionCount)
+    {
+        (selectedVariantIds, selectionCount) = _selectLayerVariantsRaw(seed, BODY_BASE_LAYER_ID);
+        if (selectionCount == 0) {
+            return (selectedVariantIds, 0);
+        }
+
+        (uint32[3] memory bodyVariantIds, uint8 bodySelectionCount) =
+            _selectLayerVariantsRaw(seed, BODY_LAYER_ID);
+        if (bodySelectionCount == 0) {
+            return (selectedVariantIds, selectionCount);
+        }
+
+        (, , , string memory bodyColor) = layerRegistry.getVariant(bodyVariantIds[0]);
+        (, , , string memory bodyBaseColor) = layerRegistry.getVariant(selectedVariantIds[0]);
+        if (keccak256(bytes(bodyBaseColor)) != keccak256(bytes(bodyColor))) {
+            return (selectedVariantIds, selectionCount);
+        }
+
+        uint256 sameColorSeed = uint256(keccak256(abi.encodePacked(seed, "bodybase-same-color")));
+        if (sameColorSeed % 16 == 0) {
+            return (selectedVariantIds, selectionCount);
+        }
+
+        uint32 alternativeVariantId =
+            _findAlternativeColorVariant(BODY_BASE_LAYER_ID, bodyColor, sameColorSeed);
+        if (alternativeVariantId != 0) {
+            selectedVariantIds[0] = alternativeVariantId;
+        }
+
+        return (selectedVariantIds, selectionCount);
+    }
+
+    function _findAlternativeColorVariant(uint16 layerId, string memory excludedColor, uint256 seed)
+        internal
+        view
+        returns (uint32)
+    {
+        uint32[] memory variantIds = layerRegistry.getLayerVariantIds(layerId);
+        if (variantIds.length == 0) {
+            return 0;
+        }
+
+        bytes32 excludedHash = keccak256(bytes(excludedColor));
+        uint256 startIndex = seed % variantIds.length;
+
+        for (uint256 offset = 0; offset < variantIds.length; offset++) {
+            uint32 variantId = variantIds[(startIndex + offset) % variantIds.length];
+            (, , , string memory variantColor) = layerRegistry.getVariant(variantId);
+
+            if (keccak256(bytes(variantColor)) != excludedHash) {
+                return variantId;
+            }
+        }
+
+        return 0;
+    }
+
+    function _isBodyBaseLayer() internal view returns (bool) {
+        (string memory layerName, , , ) = layerRegistry.getLayer(BODY_BASE_LAYER_ID);
+        return keccak256(bytes(layerName)) == BODY_BASE_LAYER_HASH;
+    }
+
+    function _alreadySelected(uint32[3] memory selectedVariantIds, uint8 limit, uint32 variantId)
         internal
         pure
-        returns (bytes memory out)
+        returns (bool)
     {
-        uint256 total;
-        for (uint256 i = 0; i < count; i++) {
-            total += parts[i].length;
-        }
-
-        out = new bytes(total);
-        uint256 offset;
-        for (uint256 i = 0; i < count; i++) {
-            bytes memory part = parts[i];
-            for (uint256 j = 0; j < part.length; j++) {
-                out[offset + j] = part[j];
+        for (uint256 index = 0; index < limit; index++) {
+            if (selectedVariantIds[index] == variantId) {
+                return true;
             }
-            offset += part.length;
         }
+        return false;
     }
 
-    function _applyPalette(
-        bytes memory source,
-        bytes memory paletteData,
-        uint8 slotCount,
-        uint8 paletteVariant,
-        uint8[] memory mixedOrder
-    ) internal pure returns (string memory) {
-        // Worst case all bytes are slot tokens: 3 bytes -> 7 bytes, so 3x is safe.
-        bytes memory out = new bytes(source.length * 3 + 16);
-        uint256 outOffset;
-
-        for (uint256 i = 0; i < source.length; i++) {
-            (bool ok, uint8 slot) = _tryParseSlotToken(source, i, slotCount);
-            if (!ok) {
-                out[outOffset++] = source[i];
-                continue;
-            }
-
-            uint256 colorOffset =
-                (uint256(paletteVariant) * uint256(slotCount) + uint256(mixedOrder[slot])) * 3;
-
-            out[outOffset++] = 0x23; // '#'
-            _writeByteHex(out, outOffset, paletteData[colorOffset]);
-            outOffset += 2;
-            _writeByteHex(out, outOffset, paletteData[colorOffset + 1]);
-            outOffset += 2;
-            _writeByteHex(out, outOffset, paletteData[colorOffset + 2]);
-            outOffset += 2;
-            i += 2;
-        }
-
-        assembly ("memory-safe") {
-            mstore(out, outOffset)
-        }
-        return string(out);
-    }
-
-    function _tryParseSlotToken(bytes memory data, uint256 index, uint8 slotCount)
+    function _baseSeed(uint8 philId, uint8 paletteVariant, uint8 mixMode, uint32 mixSeed)
         internal
         pure
-        returns (bool ok, uint8 slot)
+        returns (bytes32)
     {
-        if (index + 2 >= data.length) return (false, 0);
-        if (data[index] != 0x40) return (false, 0); // '@'
-
-        bytes1 c1 = data[index + 1];
-        bytes1 c2 = data[index + 2];
-        if (!_isHex(c1) || !_isHex(c2)) return (false, 0);
-
-        slot = (_fromHex(c1) << 4) | _fromHex(c2);
-        if (slot >= slotCount) return (false, 0);
-        return (true, slot);
-    }
-
-    function _writeByteHex(bytes memory out, uint256 offset, bytes1 value) internal pure {
-        uint8 v = uint8(value);
-        out[offset] = _toHex(v >> 4);
-        out[offset + 1] = _toHex(v & 0x0f);
-    }
-
-    function _toHex(uint8 nibble) internal pure returns (bytes1) {
-        return nibble < 10 ? bytes1(nibble + 48) : bytes1(nibble + 87);
-    }
-
-    function _isHex(bytes1 c) internal pure returns (bool) {
-        return (c >= "0" && c <= "9")
-            || (c >= "a" && c <= "f")
-            || (c >= "A" && c <= "F");
-    }
-
-    function _fromHex(bytes1 c) internal pure returns (uint8) {
-        if (c >= "0" && c <= "9") return uint8(c) - 48;
-        if (c >= "a" && c <= "f") return uint8(c) - 87;
-        return uint8(c) - 55;
-    }
-
-    function _nextRand(uint32 state) internal pure returns (uint32) {
-        uint32 x = state;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        return x;
-    }
-
-    function _buildMixedOrder(uint8 slotCount, uint8 mixMode, uint32 mixSeed)
-        internal
-        pure
-        returns (uint8[] memory order)
-    {
-        order = new uint8[](slotCount);
-        for (uint256 i = 0; i < slotCount; i++) {
-            order[i] = uint8(i);
+        if (mixMode == MIX_MODE_NONE) {
+            return keccak256(abi.encodePacked("zkPhil", philId, paletteVariant));
         }
-
-        if (slotCount < 2 || mixMode == MIX_MODE_NONE) {
-            return order;
-        }
-
-        uint32 state = mixSeed == 0 ? GOLDEN_MIX_SEED : mixSeed;
 
         if (mixMode == MIX_MODE_SWAP) {
-            state = _nextRand(state);
-            uint8 swaps = uint8((state % 3) + 1);
-            for (uint8 i = 0; i < swaps; i++) {
-                state = _nextRand(state);
-                uint8 a = uint8(state % slotCount);
-                state = _nextRand(state);
-                uint8 b = uint8(state % slotCount);
-                if (a == b) b = uint8((uint256(b) + 1) % slotCount);
-                uint8 temp = order[a];
-                order[a] = order[b];
-                order[b] = temp;
-            }
-            return order;
+            return keccak256(abi.encodePacked("zkPhil-swap", philId, paletteVariant, mixSeed));
         }
 
-        for (uint256 i = uint256(slotCount - 1); i > 0; i--) {
-            state = _nextRand(state);
-            uint256 j = uint256(state) % (i + 1);
-            uint8 temp = order[i];
-            order[i] = order[j];
-            order[j] = temp;
-        }
+        return keccak256(abi.encodePacked("zkPhil-permute", mixSeed, paletteVariant, philId));
+    }
 
-        return order;
+    function _validateInputs(uint8 philId, uint8 paletteVariant, uint8 mixMode) internal pure {
+        if (philId >= PHIL_COUNT) revert BadPhilId();
+        if (paletteVariant >= PALETTE_COUNT) revert BadPaletteVariant();
+        if (mixMode > MIX_MODE_PERMUTE) revert BadMixMode();
     }
 }

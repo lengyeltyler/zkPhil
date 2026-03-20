@@ -2,16 +2,15 @@
 pragma solidity ^0.8.24;
 
 /// @title IProofGate
-/// @notice Interface for local STARK-dev allowlist verification gate
+/// @notice Interface for fact-registry-backed proof verification gate
 interface IProofGate {
     struct MintProof {
         // 0 means no expiry.
         uint256 expiry;
-        // Deterministic local prover fact hash binding proof + mint intent.
+        // Deterministic fact hash binding the Cairo public outputs to the claim intent.
         bytes32 factHash;
-        // Merkle witness for `leaf = keccak256(abi.encodePacked(recipient))`.
-        bytes32[] merkleProof;
-        // Signature by `recipient` over the claim hash.
+        // Opaque proof metadata bytes. In zkPhil's local S-two flow this is
+        // abi.encode(nullifier, credentialSlot, credentialLeaf).
         bytes signature;
     }
 
@@ -40,4 +39,7 @@ interface IProofGate {
     /// @param nullifier The nullifier to check
     /// @return True if the nullifier has been consumed
     function nullifierUsed(bytes32 nullifier) external view returns (bool);
+
+    /// @notice Check if a decoded proof nullifier has already been consumed.
+    function isNullifierSpent(uint256 nullifier) external view returns (bool);
 }

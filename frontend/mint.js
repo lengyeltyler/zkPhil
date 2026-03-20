@@ -1,5 +1,5 @@
 /**
- * Phil Test13 Mint Page (STARK Allowlist + EIP-4337)
+ * Phil Identity Mint Page (Eligibility Proofs + EIP-4337)
  */
 
 import {
@@ -14,46 +14,98 @@ import {
   waitForUserOpReceipt,
   ENTRY_POINT_V07,
 } from "./userop.js";
+import {
+  buildBackendCompatibilityMessage,
+  evaluateBackendCompatibility,
+} from "../shared/config/backendCompatibility.mjs";
 
 // ── Configuration ──────────────────────────────────────────────
 
 const urlParams = new URLSearchParams(window.location.search);
 const testModeOverride = (urlParams.get("testMode") || "").toLowerCase();
 
+function chainIdToHex(chainId) {
+  return `0x${BigInt(chainId).toString(16)}`;
+}
+
+function defaultNetworkMeta(chainId) {
+  if (chainId === 1) {
+    return {
+      key: "mainnet",
+      name: "Ethereum Mainnet",
+      explorerBase: "https://etherscan.io",
+    };
+  }
+  if (chainId === 17000) {
+    return {
+      key: "holesky",
+      name: "Holesky",
+      explorerBase: "https://holesky.etherscan.io",
+    };
+  }
+  if (chainId === 11155111) {
+    return {
+      key: "sepolia",
+      name: "Sepolia",
+      explorerBase: "https://sepolia.etherscan.io",
+    };
+  }
+  return {
+    key: "local",
+    name: "Local",
+    explorerBase: "",
+  };
+}
+
+const requestedChainId = Number(urlParams.get("chainId") || "31337");
+const resolvedChainId = Number.isInteger(requestedChainId) && requestedChainId > 0
+  ? requestedChainId
+  : 31337;
+const requestedDeploymentsChainId = Number(
+  urlParams.get("deploymentsChainId") || String(resolvedChainId)
+);
+const resolvedDeploymentsChainId =
+  Number.isInteger(requestedDeploymentsChainId) && requestedDeploymentsChainId > 0
+    ? requestedDeploymentsChainId
+    : resolvedChainId;
+const defaults = defaultNetworkMeta(resolvedChainId);
+
 const NETWORK = Object.freeze({
-  key: "local",
-  chainId: 31337,
-  chainIdHex: "0x7a69",
-  name: "Local",
-  rpcUrl: "http://127.0.0.1:8545",
-  proofServer: "http://localhost:8787",
-  explorerBase: "",
-  deploymentsChainId: 31337,
-  bundlerRpc: "",
+  key: defaults.key,
+  chainId: resolvedChainId,
+  chainIdHex: chainIdToHex(resolvedChainId),
+  name: urlParams.get("chainName") || defaults.name,
+  rpcUrl: urlParams.get("rpc") || "http://127.0.0.1:8545",
+  proofServer: urlParams.get("server") || "http://localhost:8787",
+  explorerBase: urlParams.get("explorer") || defaults.explorerBase,
+  deploymentsChainId: resolvedDeploymentsChainId,
+  bundlerRpc: urlParams.get("bundler") || "",
 });
 const ACTIVE_NETWORK = NETWORK;
-const DEPLOYMENTS_STARK_FILE = "stark_31337.json";
-const DEPLOYMENTS_4337_FILE = "4337_31337.json";
-const TARGET_CHAIN_ID = 31337n;
-const TARGET_CHAIN_ID_HEX = "0x7a69";
+const DEPLOYMENTS_STARK_FILE = `stark_${ACTIVE_NETWORK.deploymentsChainId}.json`;
+const DEPLOYMENTS_4337_FILE = `4337_${ACTIVE_NETWORK.deploymentsChainId}.json`;
+const TARGET_CHAIN_ID = BigInt(ACTIVE_NETWORK.chainId);
+const TARGET_CHAIN_ID_HEX = ACTIVE_NETWORK.chainIdHex;
 const TEST_MODE_FORCED_ON = ["1", "true", "on", "force"].includes(testModeOverride);
 const TEST_MODE_FORCED_OFF = ["0", "off", "false", "no"].includes(testModeOverride);
 const FORCE_DIRECT_LOCAL_AA = ["1", "true", "on", "force"].includes((urlParams.get("directAa") || "").toLowerCase());
 const TEST_MODE_ENABLED = !TEST_MODE_FORCED_OFF || TEST_MODE_FORCED_ON;
 
-const PROOF_SERVER = urlParams.get("server") || ACTIVE_NETWORK.proofServer;
+const PROOF_SERVER = ACTIVE_NETWORK.proofServer;
 const ETHERSCAN_BASE = ACTIVE_NETWORK.explorerBase;
+const LOCAL_PROVER_URL = urlParams.get("localProver") || "http://127.0.0.1:8747";
 
 // Bundler RPC (optional)
-const BUNDLER_RPC = urlParams.get("bundler") || ACTIVE_NETWORK.bundlerRpc;
+const BUNDLER_RPC = ACTIVE_NETWORK.bundlerRpc;
 const WALLET_DEBUG = urlParams.get("debugWallet") === "1";
 
 // Deployed contract addresses (loaded from deployments/)
-let PHIL_TEST_MINT = "";
+let PHIL_IDENTITY_MINT = "";
 let PHIL_ACCOUNT_FACTORY = "";
 let PHIL_ACCOUNT_IMPL = "";
 let PHIL_PAYMASTER = "";
 let PHIL_UNLOCK_INBOX = "";
+let PROOF_GATE_ADDRESS = "";
 let ENTRY_POINT_ADDRESS = ENTRY_POINT_V07;
 let LOADED_STARK_DEPLOYMENT = "";
 let LOADED_4337_DEPLOYMENT = "";
@@ -63,11 +115,12 @@ const STARKNET_UNLOCK_URL = "";
 
 async function loadDeployments() {
   // Always reset first so we never carry stale addresses across network/context switches.
-  PHIL_TEST_MINT = "";
+  PHIL_IDENTITY_MINT = "";
   PHIL_ACCOUNT_FACTORY = "";
   PHIL_ACCOUNT_IMPL = "";
   PHIL_PAYMASTER = "";
   PHIL_UNLOCK_INBOX = "";
+  PROOF_GATE_ADDRESS = "";
   ENTRY_POINT_ADDRESS = ENTRY_POINT_V07;
   LOADED_STARK_DEPLOYMENT = "";
   LOADED_4337_DEPLOYMENT = "";
@@ -76,9 +129,12 @@ async function loadDeployments() {
     const res = await fetch(`../deployments/${DEPLOYMENTS_STARK_FILE}`, { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
-      if (data.PhilTestMint) {
-        PHIL_TEST_MINT = data.PhilTestMint;
+      if (data.PhilIdentityMint) {
+        PHIL_IDENTITY_MINT = data.PhilIdentityMint;
         LOADED_STARK_DEPLOYMENT = DEPLOYMENTS_STARK_FILE;
+      }
+      if (data.PhilIdentityGate || data.ProofGate) {
+        PROOF_GATE_ADDRESS = data.PhilIdentityGate || data.ProofGate;
       }
     }
   } catch { /* ignore */ }
@@ -91,6 +147,9 @@ async function loadDeployments() {
       if (data.PhilAccountImpl) PHIL_ACCOUNT_IMPL = data.PhilAccountImpl;
       if (data.PhilPaymaster) PHIL_PAYMASTER = data.PhilPaymaster;
       if (data.PhilUnlockInbox) PHIL_UNLOCK_INBOX = data.PhilUnlockInbox;
+      if (!PROOF_GATE_ADDRESS && (data.PhilIdentityGate || data.ProofGate)) {
+        PROOF_GATE_ADDRESS = data.PhilIdentityGate || data.ProofGate;
+      }
       if (data.EntryPoint) ENTRY_POINT_ADDRESS = data.EntryPoint;
       if (data.PhilAccountFactory || data.EntryPoint) {
         LOADED_4337_DEPLOYMENT = DEPLOYMENTS_4337_FILE;
@@ -100,7 +159,7 @@ async function loadDeployments() {
 }
 
 const MINT_ABI = [
-  "function mint(address recipient, address mintTo, uint8 paletteId, uint8 decalId, uint8 outlineId, uint8 spikesShape, uint8 bodyShape, uint8 teethShape, bytes32 factHash, uint256[6] outputs) external",
+  "function mint(address recipient, address mintTo, uint8 philId, uint8 paletteVariant, uint8 mixMode, uint32 mixSeed, (uint256 expiry, bytes32 factHash, bytes signature) proof) external",
   "function decalUsed(uint8) view returns (bool)",
   "function totalSupply() view returns (uint256)",
 ];
@@ -509,6 +568,12 @@ const state = {
   hasCorrectNetwork: false,
   backendCompatible: false,
   backendStatus: null,
+  backendAuthRecipient: null,
+  backendAuthToken: null,
+  backendAuthExpiresAt: 0,
+  eligibilityChecked: false,
+  eligibilityEligible: false,
+  eligibilityRemaining: 0,
   mintReady: false,
   selectionLocked: false,
   lockedIndex: null,
@@ -563,7 +628,6 @@ let lastViewState = "disconnected";
 let walletListenerProvider = null;
 let onWalletAccountsChanged = null;
 let onWalletChainChanged = null;
-let testModeContextPromise = null;
 const INITIAL_GALLERY_ROWS = 3;
 const APPEND_GALLERY_ROWS = 2;
 const MAX_GALLERY_ROWS = 30;
@@ -574,17 +638,19 @@ function getReadProvider() {
 }
 
 function modeLabel() {
-  return "net=local";
+  return `net=${ACTIVE_NETWORK.key}`;
 }
 
-function buildBackendMismatchMessage(backendChainId, backendFactory) {
-  const expectedChain = ACTIVE_NETWORK.chainId;
-  const expectedFactory = PHIL_ACCOUNT_FACTORY || "n/a";
-  const chainPart = Number.isFinite(backendChainId) && backendChainId > 0
-    ? `Backend is on ${backendChainId}, expected ${expectedChain}.`
-    : `Backend chain is unknown, expected ${expectedChain}.`;
-  return `${chainPart} Backend is not local. Start local node. ` +
-    `backendFactory=${backendFactory || "unknown"}, frontendFactory=${expectedFactory}.`;
+function buildBackendMismatchMessage(status) {
+  return buildBackendCompatibilityMessage(
+    evaluateBackendCompatibility({
+      backendStatus: status,
+      expectedChainId: ACTIVE_NETWORK.chainId,
+      expectedFactory: PHIL_ACCOUNT_FACTORY,
+      expectedProofGate: PROOF_GATE_ADDRESS,
+      expectedPaymaster: PHIL_PAYMASTER,
+    })
+  );
 }
 
 function updateConfigBanner() {
@@ -628,16 +694,16 @@ async function fetchBackendStatus({ force = false } = {}) {
   }
 
   const backendChainId = Number(payload.backendChainId);
-  const backendFactory = payload.backendFactory || "";
-  const normalizedBackendFactory = backendFactory ? backendFactory.toLowerCase() : "";
-  const normalizedFrontendFactory = PHIL_ACCOUNT_FACTORY ? PHIL_ACCOUNT_FACTORY.toLowerCase() : "";
-  const chainMatches = Number.isFinite(backendChainId) && backendChainId === ACTIVE_NETWORK.chainId;
-  const factoryMatches = !normalizedFrontendFactory || !normalizedBackendFactory
-    ? true
-    : normalizedBackendFactory === normalizedFrontendFactory;
+  const compatibility = evaluateBackendCompatibility({
+    backendStatus: payload,
+    expectedChainId: ACTIVE_NETWORK.chainId,
+    expectedFactory: PHIL_ACCOUNT_FACTORY,
+    expectedProofGate: PROOF_GATE_ADDRESS,
+    expectedPaymaster: PHIL_PAYMASTER,
+  });
 
   state.backendStatus = payload;
-  state.backendCompatible = chainMatches && factoryMatches;
+  state.backendCompatible = compatibility.ok && backendChainId === ACTIVE_NETWORK.chainId;
   updateConfigBanner();
   return payload;
 }
@@ -648,10 +714,64 @@ async function ensureBackendCompatibility(actionLabel = "/compute-account") {
     throw new Error(`Backend ${actionLabel} unavailable at ${PROOF_SERVER}.`);
   }
   if (!state.backendCompatible) {
-    throw new Error(
-      buildBackendMismatchMessage(Number(status.backendChainId), status.backendFactory || "")
-    );
+    throw new Error(buildBackendMismatchMessage(status));
   }
+}
+
+async function ensureBackendAuthToken() {
+  if (!state.signer || !state.address) {
+    throw new Error("Wallet is not ready for backend authentication.");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const currentRecipient = state.address.toLowerCase();
+  if (
+    state.backendAuthToken &&
+    state.backendAuthRecipient === currentRecipient &&
+    Number(state.backendAuthExpiresAt || 0) > now + 30
+  ) {
+    return state.backendAuthToken;
+  }
+
+  const challengeRes = await fetch(`${PROOF_SERVER}/auth/challenge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipient: state.address,
+    }),
+  });
+  const challengePayload = await challengeRes.json().catch(() => null);
+  if (!challengeRes.ok || !challengePayload?.message || !challengePayload?.nonce) {
+    state.backendAuthRecipient = null;
+    state.backendAuthToken = null;
+    state.backendAuthExpiresAt = 0;
+    const reason = challengePayload?.error || `HTTP ${challengeRes.status}`;
+    throw new Error(`Backend auth challenge failed: ${reason}`);
+  }
+
+  const signature = await state.signer.signMessage(challengePayload.message);
+  const verifyRes = await fetch(`${PROOF_SERVER}/auth/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipient: state.address,
+      nonce: challengePayload.nonce,
+      signature,
+    }),
+  });
+  const verifyPayload = await verifyRes.json().catch(() => null);
+  if (!verifyRes.ok || !verifyPayload?.token) {
+    state.backendAuthRecipient = null;
+    state.backendAuthToken = null;
+    state.backendAuthExpiresAt = 0;
+    const reason = verifyPayload?.error || verifyPayload?.code || `HTTP ${verifyRes.status}`;
+    throw new Error(`Backend auth verify failed: ${reason}`);
+  }
+
+  state.backendAuthRecipient = currentRecipient;
+  state.backendAuthToken = verifyPayload.token;
+  state.backendAuthExpiresAt = Number(verifyPayload.expiresAt || 0);
+  return state.backendAuthToken;
 }
 
 function walletDebug(label, data) {
@@ -671,6 +791,49 @@ function clearError() {
   errorMessage.textContent = "";
   if (retryMintBtn) retryMintBtn.classList.add("hidden");
   errorBanner.classList.add("hidden");
+}
+
+function getEligibilityMessage() {
+  if (!state.address || !state.hasCorrectNetwork) return "";
+  if (!state.eligibilityChecked) return "Checking eligibility...";
+  if (state.eligibilityEligible) return "";
+  return "Not eligible to issue a Phil identity";
+}
+
+async function refreshEligibility({ suppressErrors = false } = {}) {
+  if (!state.address) {
+    state.eligibilityChecked = false;
+    state.eligibilityEligible = false;
+    state.eligibilityRemaining = 0;
+    updateSelectionMeta();
+    updateUiState();
+    return;
+  }
+
+  try {
+    const res = await fetch(
+      `${PROOF_SERVER}/eligibility?address=${encodeURIComponent(state.address)}`,
+      { cache: "no-store" }
+    );
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || !payload) {
+      throw new Error(payload?.error || `HTTP ${res.status}`);
+    }
+
+    state.eligibilityChecked = true;
+    state.eligibilityEligible = Boolean(payload.eligible);
+    state.eligibilityRemaining = Number(payload.remaining || 0);
+  } catch (err) {
+    state.eligibilityChecked = false;
+    state.eligibilityEligible = false;
+    state.eligibilityRemaining = 0;
+    if (!suppressErrors) {
+      setError(`Failed to check eligibility: ${err?.message || "Unknown error"}`);
+    }
+  }
+
+  updateSelectionMeta();
+  updateUiState();
 }
 
 function setFlowStage(stage, { errored = false } = {}) {
@@ -696,7 +859,16 @@ function shortAddr(addr) {
 function getViewState() {
   const connected = Boolean(state.address);
   if (!connected) return "disconnected";
-  if (connected && state.hasCorrectNetwork && state.mintReady && state.selectedIndex != null) return "mint-ready";
+  if (
+    connected &&
+    state.hasCorrectNetwork &&
+    state.eligibilityChecked &&
+    state.eligibilityEligible &&
+    state.mintReady &&
+    state.selectedIndex != null
+  ) {
+    return "mint-ready";
+  }
   return "connected";
 }
 
@@ -879,6 +1051,12 @@ function clearWalletState() {
   state.ownerCount = 0;
   state.scopeMask = 0;
   state.hasCorrectNetwork = false;
+  state.backendAuthRecipient = null;
+  state.backendAuthToken = null;
+  state.backendAuthExpiresAt = 0;
+  state.eligibilityChecked = false;
+  state.eligibilityEligible = false;
+  state.eligibilityRemaining = 0;
   state.mintReady = false;
   state.selectionLocked = false;
   state.lockedIndex = null;
@@ -901,91 +1079,6 @@ function getDeterministicTestStarkKeyPair(ethers, eoa) {
   };
 }
 
-function normalizeHexUint256(value, ethers) {
-  return ethers.toBeHex(BigInt(value), 32);
-}
-
-function computeCanonicalFactHash(ethers, programHash, outputs) {
-  const packedOutputs = ethers.solidityPacked(
-    ["uint256", "uint256", "uint256", "uint256", "uint256", "uint256"],
-    outputs
-  );
-  const outputHash = ethers.keccak256(packedOutputs);
-  return ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "bytes32"],
-      [ethers.zeroPadValue(programHash, 32), outputHash]
-    )
-  );
-}
-
-async function getTestModeContext() {
-  if (testModeContextPromise) return testModeContextPromise;
-  testModeContextPromise = (async () => {
-    const fallback = {
-      merkleRoot: "0x" + "00".repeat(32),
-      programHash: "0x" + "00".repeat(32),
-      dropId: "0x" + "00".repeat(31) + "01",
-    };
-
-    try {
-      const res = await fetch(`${PROOF_SERVER}/status`, { cache: "no-store" });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.status === "ok") {
-        if (Number(data.backendChainId) !== ACTIVE_NETWORK.chainId) {
-          throw new Error(
-            buildBackendMismatchMessage(Number(data.backendChainId), data.backendFactory || "")
-          );
-        }
-        return {
-          merkleRoot: data.merkleRoot || fallback.merkleRoot,
-          programHash: data.programHash || fallback.programHash,
-          dropId: data.dropId || fallback.dropId,
-        };
-      }
-    } catch {
-      // fallback below
-    }
-
-    throw new Error("TEST MODE requires backend /status on local network");
-  })();
-  return testModeContextPromise;
-}
-
-async function buildTestModeProofPayload() {
-  const ethers = state.ethers;
-  const recipient = state.address;
-  const context = await getTestModeContext();
-  const recipientUint = BigInt(recipient);
-  const dropId = BigInt(context.dropId);
-  const merkleRoot = BigInt(context.merkleRoot);
-  const programHash = ethers.zeroPadValue(context.programHash, 32);
-  const decal = BigInt(state.decalId ?? 0);
-  const nullifier = ethers.solidityPackedKeccak256(
-    ["string", "uint256", "address", "uint256"],
-    ["phil-test-mode-nullifier", BigInt(ACTIVE_NETWORK.chainId), recipient, decal]
-  );
-  const outputs = [
-    merkleRoot,
-    dropId,
-    recipientUint,
-    BigInt(nullifier),
-    BigInt(ethers.solidityPackedKeccak256(["string", "address", "uint256"], ["phil-test-mode-leaf", recipient, decal])),
-    decal,
-  ];
-  const factHash = computeCanonicalFactHash(ethers, programHash, outputs);
-  return {
-    success: true,
-    factHash: normalizeHexUint256(factHash, ethers),
-    outputs: outputs.map((o) => normalizeHexUint256(o, ethers)),
-    nullifier: normalizeHexUint256(nullifier, ethers),
-    dropId: normalizeHexUint256(dropId, ethers),
-    programHash: normalizeHexUint256(programHash, ethers),
-    merkleRoot: normalizeHexUint256(merkleRoot, ethers),
-    testMode: true,
-  };
-}
-
 async function switchToTargetNetwork() {
   const provider = state.eip1193 || pickInjectedProvider();
   if (!provider) return;
@@ -996,7 +1089,7 @@ async function switchToTargetNetwork() {
     if (err?.code === 4902) {
       const addChainParams = {
         chainId: TARGET_CHAIN_ID_HEX,
-        chainName: "Local Hardhat",
+        chainName: ACTIVE_NETWORK.name,
         nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
         rpcUrls: [ACTIVE_NETWORK.rpcUrl],
       };
@@ -1108,7 +1201,7 @@ async function connectWallet({ silent = false } = {}) {
     const readNetwork = await state.readProvider.getNetwork();
     if (!isCorrectNetwork(readNetwork.chainId)) {
       throw new Error(
-        `Fatal network guard: local RPC must be chain ${ACTIVE_NETWORK.chainId}, got ${readNetwork.chainId}`
+        `Fatal network guard: RPC_URL must resolve to chain ${ACTIVE_NETWORK.chainId}, got ${readNetwork.chainId}`
       );
     }
 
@@ -1129,7 +1222,7 @@ async function connectWallet({ silent = false } = {}) {
         state.isSmartAccountDeployed = false;
         if (walletStatus) walletStatus.textContent = "Wrong network selected";
         setError(
-          `Switch MetaMask to Local (31337) to continue. ${switchErr?.message || ""}`.trim()
+          `Switch MetaMask to ${ACTIVE_NETWORK.name} (${ACTIVE_NETWORK.chainId}) to continue. ${switchErr?.message || ""}`.trim()
         );
         setFlowStage("connect");
         updateUiState();
@@ -1140,14 +1233,14 @@ async function connectWallet({ silent = false } = {}) {
         state.smartAccount = null;
         state.isSmartAccountDeployed = false;
         if (walletStatus) walletStatus.textContent = "Wrong network selected";
-        setError("Switch MetaMask to Local (31337) to continue.");
+        setError(`Switch MetaMask to ${ACTIVE_NETWORK.name} (${ACTIVE_NETWORK.chainId}) to continue.`);
         setFlowStage("connect");
         updateUiState();
         return true;
       }
     }
 
-    if (!PHIL_TEST_MINT) {
+    if (!PHIL_IDENTITY_MINT) {
       throw new Error(`Missing deployment for chain ${ACTIVE_NETWORK.deploymentsChainId}`);
     }
 
@@ -1173,6 +1266,7 @@ async function connectWallet({ silent = false } = {}) {
     }
 
     await loadContractState();
+    await refreshEligibility();
     if (walletStatus) {
       walletStatus.textContent = TEST_MODE_ENABLED
         ? `Connected on ${ACTIVE_NETWORK.name} (TEST MODE)`
@@ -1344,9 +1438,9 @@ function buildUnlockPayload() {
 
 async function loadContractState() {
   const readProvider = getReadProvider();
-  if (!readProvider || !state.ethers || !PHIL_TEST_MINT) return;
+  if (!readProvider || !state.ethers || !PHIL_IDENTITY_MINT) return;
 
-  const contract = new state.ethers.Contract(PHIL_TEST_MINT, MINT_ABI, readProvider);
+  const contract = new state.ethers.Contract(PHIL_IDENTITY_MINT, MINT_ABI, readProvider);
 
   try {
     state.totalSupply = Number(await contract.totalSupply());
@@ -1681,8 +1775,9 @@ function selectConfig(index) {
 
 function updateSelectionMeta() {
   if (!selectionStatus || !selectedTraits) return;
+  const eligibilityMessage = getEligibilityMessage();
   if (state.selectedIndex == null) {
-    selectionStatus.textContent = "Scroll to generate. Click a Phil to select it.";
+    selectionStatus.textContent = eligibilityMessage || "Scroll to generate. Click a Phil to select it.";
     selectedTraits.innerHTML = "";
     return;
   }
@@ -1702,9 +1797,11 @@ function updateSelectionMeta() {
   const lensShape = LENS_SHAPES[config.lensIdx] || null;
   const frame = getFrameForLens(lensShape);
 
-  selectionStatus.textContent = state.selectionLocked
-    ? `Locked Phil #${state.selectedIndex + 1} ready to mint`
-    : `Selected Phil #${state.selectedIndex + 1}`;
+  selectionStatus.textContent = eligibilityMessage || (
+    state.selectionLocked
+      ? `Locked Phil #${state.selectedIndex + 1} ready to mint`
+      : `Selected Phil #${state.selectedIndex + 1}`
+  );
   const backgroundLabel = config.bgMode === "nebulaStars"
     ? `${nebula.label} + Stars`
     : `${spiral.label} + Dust`;
@@ -1793,6 +1890,8 @@ function updateMintButton() {
   const canMint =
     state.address &&
     state.hasCorrectNetwork &&
+    state.eligibilityChecked &&
+    state.eligibilityEligible &&
     (!state.use4337 || state.backendCompatible) &&
     state.mintReady &&
     state.selectedIndex != null &&
@@ -1816,16 +1915,61 @@ function renderMintSuccess(title, txHash) {
   `;
 }
 
-async function requestProof() {
+async function requestProof(options = {}) {
   setFlowStage("proof");
-  if (TEST_MODE_ENABLED) {
-    return buildTestModeProofPayload();
+  if (!state.ethers || !state.signer || !state.address) {
+    throw new Error("Wallet is not ready for proof generation.");
   }
+
+  const kind = options.kind === "action" ? "action" : "mint";
+  const opts = options;
+  if (!PROOF_GATE_ADDRESS) {
+    throw new Error("ProofGate address is missing from deployments.");
+  }
+
+  let payloadBody;
+  if (kind === "action") {
+    if (!opts.actionHash || opts.actionType == null) {
+      throw new Error("Action proof requires actionType and actionHash.");
+    }
+    if (Number(opts.actionType) !== 2) {
+      throw new Error(
+        "Only ACTION_ACCOUNT_CREATE (2) is supported. Execution approvals are unlock-ticket-only."
+      );
+    }
+    payloadBody = {
+      kind: "action",
+      recipient: state.address,
+      actionType: Number(opts.actionType),
+      actionHash: opts.actionHash,
+      ...(opts.expiry != null ? { expiry: opts.expiry } : {}),
+    };
+  } else {
+    const philId = Number(state.selectedIndex ?? 0) % 6;
+    const paletteVariant = Number(state.paletteId ?? 0);
+    const mixMode = 0;
+    const mixSeed = 0;
+    const mintTo = opts.mintTo || state.address;
+    payloadBody = {
+      kind: "mint",
+      recipient: state.address,
+      mintTo,
+      philId,
+      paletteVariant,
+      mixMode,
+      mixSeed,
+    };
+  }
+
   await ensureBackendCompatibility("/request-mint");
+  const authToken = await ensureBackendAuthToken();
   const proofRes = await fetch(`${PROOF_SERVER}/request-mint`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ recipient: state.address }),
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify(payloadBody),
   });
 
   const payload = await proofRes.json().catch(() => null);
@@ -1836,7 +1980,50 @@ async function requestProof() {
     throw err;
   }
 
-  return payload;
+  const localProverRes = await fetch(`${LOCAL_PROVER_URL}/prove`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      request: payload.provingRequest,
+    }),
+  });
+  const localProverPayload = await localProverRes.json().catch(() => null);
+  if (!localProverRes.ok || !localProverPayload?.success || !localProverPayload?.proof) {
+    const reason = localProverPayload?.error || `HTTP ${localProverRes.status}`;
+    const err = new Error(`Local proving failed: ${reason}`);
+    err.flowStep = "proof";
+    throw err;
+  }
+
+  const registerRes = await fetch(`${PROOF_SERVER}/register-proof`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({
+      proofId: payload.proofId,
+      proof: localProverPayload.proof,
+    }),
+  });
+  const registerPayload = await registerRes.json().catch(() => null);
+  if (!registerRes.ok || !registerPayload?.success) {
+    const reason = registerPayload?.error || registerPayload?.code || `HTTP ${registerRes.status}`;
+    const err = new Error(`Fact registration failed: ${reason}`);
+    err.flowStep = "proof";
+    throw err;
+  }
+
+  return {
+    ...payload,
+    proof: localProverPayload.proof,
+    factHash: localProverPayload.proof.factHash,
+    signature: localProverPayload.proof.signature,
+    localArtifact: localProverPayload.artifact || null,
+    factRegistered: true,
+  };
 }
 
 async function doMint() {
@@ -1853,6 +2040,13 @@ async function doMint() {
   }
   if (!state.mintReady || state.selectedIndex == null) {
     setError("Scroll to the mint threshold and select a Phil first.");
+    return;
+  }
+  if (!state.eligibilityChecked) {
+    await refreshEligibility();
+  }
+  if (!state.eligibilityEligible) {
+    setError("Not eligible to issue a Phil identity.");
     return;
   }
 
@@ -1879,6 +2073,7 @@ async function doMint() {
     state.mintReady = false;
     setFlowStage("confirmed");
     await loadContractState();
+    await refreshEligibility({ suppressErrors: true });
     autoSelectNext();
   } catch (err) {
     console.error("Mint failed:", err);
@@ -1905,12 +2100,40 @@ async function doMint4337() {
   const code = await readProvider.getCode(recipient);
   state.isSmartAccountDeployed = code !== "0x";
 
-  const proof = await requestProof();
+  const mintProofResponse = await requestProof({ mintTo: recipient });
+  const mintProof = mintProofResponse.proof || mintProofResponse;
+  let createProof = null;
+  const mintTraits = {
+    philId: Number(state.selectedIndex ?? 0) % 6,
+    paletteVariant: Number(state.paletteId ?? 0),
+    mixMode: 0,
+    mixSeed: 0,
+  };
+
+  if (!state.isSmartAccountDeployed) {
+    const factory = new ethers.Contract(
+      PHIL_ACCOUNT_FACTORY,
+      ["function computeCreateActionHash(address owner, uint256 starkPubKeyX) view returns (bytes32)"],
+      readProvider
+    );
+    const createActionHash = await factory.computeCreateActionHash(
+      state.address,
+      state.starkKeyPair.publicKey
+    );
+    const createExpiry = Math.floor(Date.now() / 1000) + 900;
+    const createProofResponse = await requestProof({
+      kind: "action",
+      actionType: 2,
+      actionHash: createActionHash,
+      expiry: String(createExpiry),
+    });
+    createProof = createProofResponse.proof || createProofResponse;
+  }
 
   const localEntryPointCode = await readProvider.getCode(ENTRY_POINT_ADDRESS);
   // If local EntryPoint is unavailable, use direct owner-execution fallback.
   if (FORCE_DIRECT_LOCAL_AA || localEntryPointCode === "0x") {
-    const txHash = await doMint4337LocalFallback(proof, recipient);
+    const txHash = await doMint4337LocalFallback(mintProof, createProof, recipient, mintTraits);
     await loadVaultState();
     return txHash;
   }
@@ -1925,18 +2148,16 @@ async function doMint4337() {
       isDeployed: state.isSmartAccountDeployed,
       eoa: state.address,
       starkPubKeyX: state.starkKeyPair.publicKey,
-      philTestMint: PHIL_TEST_MINT,
+      philIdentityMint: PHIL_IDENTITY_MINT,
+      createProof,
       mintParams: {
         recipient: state.address,
         mintTo: recipient,
-        paletteId: state.paletteId,
-        decalId: state.decalId,
-        outlineId: state.outlineId,
-        spikesShape: state.spikesShape,
-        bodyShape: state.bodyShape,
-        teethShape: state.teethShape,
-        factHash: proof.factHash,
-        outputs: proof.outputs,
+        philId: mintTraits.philId,
+        paletteVariant: mintTraits.paletteVariant,
+        mixMode: mintTraits.mixMode,
+        mixSeed: mintTraits.mixSeed,
+        proof: mintProof,
       },
       provider: readProvider,
       entryPointAddress: ENTRY_POINT_ADDRESS,
@@ -1946,31 +2167,44 @@ async function doMint4337() {
     throw err;
   }
 
-  if (PHIL_PAYMASTER && state.usePaymaster) {
-    const pmRes = await fetch(`${PROOF_SERVER}/sign-paymaster`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sender: userOp.sender,
-        nonce: userOp.nonce,
-        initCode: userOp.initCode,
-        callData: userOp.callData,
-        accountGasLimits: userOp.accountGasLimits,
-        preVerificationGas: userOp.preVerificationGas,
-        gasFees: userOp.gasFees,
-      }),
-    });
+  if (PHIL_PAYMASTER && state.usePaymaster && mintProofResponse.proofId) {
+    try {
+      const authToken = await ensureBackendAuthToken();
+      const pmRes = await fetch(`${PROOF_SERVER}/sign-paymaster`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          proofId: mintProofResponse.proofId,
+          userOp: {
+            sender: userOp.sender,
+            nonce: userOp.nonce,
+            initCode: userOp.initCode,
+            callData: userOp.callData,
+            accountGasLimits: userOp.accountGasLimits,
+            preVerificationGas: userOp.preVerificationGas,
+            gasFees: userOp.gasFees,
+          },
+        }),
+      });
 
-    if (pmRes.ok) {
-      const pmData = await pmRes.json().catch(() => null);
-      if (pmData?.success && pmData.paymasterAndData) {
-        userOp.paymasterAndData = pmData.paymasterAndData;
+      if (pmRes.ok) {
+        const pmData = await pmRes.json().catch(() => null);
+        if (pmData?.success && pmData.paymasterAndData) {
+          userOp.paymasterAndData = pmData.paymasterAndData;
+        }
+      } else {
+        const pmErr = await pmRes.json().catch(() => null);
+        const reason = pmErr?.error || pmErr?.code || `HTTP ${pmRes.status}`;
+        console.warn(`Paymaster sponsorship rejected (${reason}); continuing with self-pay.`);
       }
-    } else {
-      const pmErr = await pmRes.json().catch(() => null);
-      const reason = pmErr?.error || pmErr?.code || `HTTP ${pmRes.status}`;
-      console.warn(`Paymaster sponsorship rejected (${reason}); continuing with self-pay.`);
+    } catch (err) {
+      console.warn(`Paymaster sponsorship skipped (${err?.message || err}); continuing with self-pay.`);
     }
+  } else if (PHIL_PAYMASTER && state.usePaymaster) {
+    console.warn("Paymaster sponsorship unavailable because request-mint did not return proofId.");
   }
 
   const userOpHash = getUserOpHash(ethers, userOp, ACTIVE_NETWORK.chainId, ENTRY_POINT_ADDRESS);
@@ -2005,66 +2239,65 @@ async function doMint4337() {
   return txHash;
 }
 
-async function doMint4337LocalFallback(proof, smartAccount) {
+async function doMint4337LocalFallback(mintProof, createProof, smartAccount, mintTraits) {
   const ethers = state.ethers;
+  const readProvider = getReadProvider();
   setFlowStage("build");
 
   if (!state.isSmartAccountDeployed) {
     const factory = new ethers.Contract(
       PHIL_ACCOUNT_FACTORY,
-      ["function createPhilAccount(address owner, uint256 starkPubKeyX) returns (address)"],
+      ["function createPhilAccount(address owner, uint256 starkPubKeyX, (uint256 expiry, bytes32 factHash, bytes signature) proof) returns (address)"],
       state.signer
     );
-    const createTx = await factory.createPhilAccount(state.address, state.starkKeyPair.publicKey);
+    const createTx = await factory.createPhilAccount(
+      state.address,
+      state.starkKeyPair.publicKey,
+      createProof
+    );
     await createTx.wait();
     const code = await readProvider.getCode(smartAccount);
     state.isSmartAccountDeployed = code !== "0x";
   }
 
-  const mintIface = new ethers.Interface([
-    "function mint(address recipient, address mintTo, uint8 paletteId, uint8 decalId, uint8 outlineId, uint8 spikesShape, uint8 bodyShape, uint8 teethShape, bytes32 factHash, uint256[6] outputs)",
-  ]);
-  const mintCalldata = mintIface.encodeFunctionData("mint", [
-    state.address,
-    smartAccount,
-    state.paletteId,
-    state.decalId,
-    state.outlineId,
-    state.spikesShape,
-    state.bodyShape,
-    state.teethShape,
-    proof.factHash,
-    proof.outputs,
-  ]);
-
   setFlowStage("submit");
-  const account = new ethers.Contract(
-    smartAccount,
-    ["function execute(address target, uint256 value, bytes data) returns (bytes)"],
+  const contract = new ethers.Contract(
+    PHIL_IDENTITY_MINT,
+    MINT_ABI,
     state.signer
   );
-  const tx = await account.execute(PHIL_TEST_MINT, 0, mintCalldata);
+  const tx = await contract.mint(
+    state.address,
+    smartAccount,
+    mintTraits.philId,
+    mintTraits.paletteVariant,
+    mintTraits.mixMode,
+    mintTraits.mixSeed,
+    mintProof
+  );
   const receipt = await tx.wait();
   return receipt.hash;
 }
 
 async function doMintLegacy() {
-  const proof = await requestProof();
+  const proofResponse = await requestProof({ mintTo: state.address });
+  const proof = proofResponse.proof || proofResponse;
+  const philId = Number(state.selectedIndex ?? 0) % 6;
+  const paletteVariant = Number(state.paletteId ?? 0);
+  const mixMode = 0;
+  const mixSeed = 0;
   setFlowStage("submit");
 
   try {
-    const contract = new state.ethers.Contract(PHIL_TEST_MINT, MINT_ABI, state.signer);
+    const contract = new state.ethers.Contract(PHIL_IDENTITY_MINT, MINT_ABI, state.signer);
     const tx = await contract.mint(
       state.address,
       state.address,
-      state.paletteId,
-      state.decalId,
-      state.outlineId,
-      state.spikesShape,
-      state.bodyShape,
-      state.teethShape,
-      proof.factHash,
-      proof.outputs
+      philId,
+      paletteVariant,
+      mixMode,
+      mixSeed,
+      proof
     );
     const receipt = await tx.wait();
     return receipt.hash;
@@ -2145,7 +2378,7 @@ async function init() {
     // non-fatal, banner/error handles connectivity state
   }
   if (!backendLocal) {
-    setError("Backend is not local. Start local node.");
+    setError(`Backend is not on chain ${ACTIVE_NETWORK.chainId}. Start the chain-matched RPC/tunnel.`);
   }
   updateUiState();
 

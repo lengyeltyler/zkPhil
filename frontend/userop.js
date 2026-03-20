@@ -17,8 +17,10 @@ const ENTRY_POINT_V07 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
 // SmartAccount.execute(address target, uint256 value, bytes calldata data)
 const EXECUTE_SELECTOR = "0xb61d27f6";
 
-// PhilTestMint.mint selector
-const MINT_SELECTOR = "0x"; // Will be computed from ABI
+const MINT_FRAGMENT =
+  "function mint(address recipient, address mintTo, uint8 philId, uint8 paletteVariant, uint8 mixMode, uint32 mixSeed, (uint256 expiry, bytes32 factHash, bytes signature) proof)";
+const CREATE_ACCOUNT_FRAGMENT =
+  "function createPhilAccount(address owner, uint256 starkPubKeyX, (uint256 expiry, bytes32 factHash, bytes signature) proof)";
 
 // Default gas values (overridden by estimation)
 const DEFAULT_VERIFICATION_GAS = 500000n;
@@ -28,34 +30,37 @@ const DEFAULT_PRE_VERIFICATION_GAS = 100000n;
 // ── ABI Encoding Helpers ──
 
 /**
- * Encode PhilTestMint.mint() calldata
+ * Encode PhilIdentityMint.mint() calldata
  */
+export function normalizeMintProofForAbi(ethers, proof) {
+  if (!proof) {
+    throw new Error("MintProof is required");
+  }
+  return {
+    expiry: BigInt(proof.expiry ?? 0),
+    factHash: ethers.zeroPadValue(proof.factHash, 32),
+    signature: proof.signature ?? "0x",
+  };
+}
+
 export function encodeMintCalldata(ethers, {
   recipient,
   mintTo,
-  paletteId,
-  decalId,
-  outlineId,
-  spikesShape,
-  bodyShape,
-  teethShape,
-  factHash,
-  outputs,
+  philId,
+  paletteVariant,
+  mixMode = 0,
+  mixSeed = 0,
+  proof,
 }) {
-  const iface = new ethers.Interface([
-    "function mint(address recipient, address mintTo, uint8 paletteId, uint8 decalId, uint8 outlineId, uint8 spikesShape, uint8 bodyShape, uint8 teethShape, bytes32 factHash, uint256[6] outputs)",
-  ]);
+  const iface = new ethers.Interface([MINT_FRAGMENT]);
   return iface.encodeFunctionData("mint", [
     recipient,
     mintTo,
-    paletteId,
-    decalId,
-    outlineId,
-    spikesShape,
-    bodyShape,
-    teethShape,
-    factHash,
-    outputs,
+    philId,
+    paletteVariant,
+    mixMode,
+    mixSeed,
+    normalizeMintProofForAbi(ethers, proof),
   ]);
 }
 
@@ -71,15 +76,17 @@ export function encodeExecuteCalldata(ethers, target, value, innerData) {
 
 /**
  * Encode the factory initCode for first-time account deployment
- * initCode = factoryAddress + createPhilAccount(owner, starkPubKeyX)
+ * initCode = factoryAddress + createPhilAccount(owner, starkPubKeyX, proof)
  */
-export function encodeInitCode(ethers, factoryAddress, owner, starkPubKeyX) {
-  const iface = new ethers.Interface([
-    "function createPhilAccount(address owner, uint256 starkPubKeyX)",
-  ]);
+export function encodeInitCode(ethers, factoryAddress, owner, starkPubKeyX, proof) {
+  const iface = new ethers.Interface([CREATE_ACCOUNT_FRAGMENT]);
+  if (!proof) {
+    throw new Error("createProof is required when building initCode");
+  }
   const factoryData = iface.encodeFunctionData("createPhilAccount", [
     owner,
     starkPubKeyX,
+    normalizeMintProofForAbi(ethers, proof),
   ]);
   // initCode = factory address (20 bytes) + factory calldata
   return ethers.concat([factoryAddress, factoryData]);
@@ -110,7 +117,7 @@ export function packGasFees(maxPriorityFee, maxFeePerGas) {
 // ── UserOp Builder ──
 
 /**
- * Build a UserOperation for minting a Phil NFT
+ * Build a UserOperation for issuing a Phil identity
  *
  * @param {object} params
  * @param {object} params.ethers - ethers.js library
@@ -119,7 +126,8 @@ export function packGasFees(maxPriorityFee, maxFeePerGas) {
  * @param {boolean} params.isDeployed - Whether the Smart Account is already deployed
  * @param {string} params.eoa - EOA owner address
  * @param {string} params.starkPubKeyX - STARK public key X-coordinate
- * @param {string} params.philTestMint - PhilTestMint contract address
+ * @param {string} params.philIdentityMint - PhilIdentityMint contract address
+ * @param {object} params.createProof - MintProof for first-time account deployment
  * @param {object} params.mintParams - Mint parameters
  * @param {string} params.paymasterAndData - Paymaster data (or "0x" for self-pay)
  * @param {object} params.provider - ethers provider for gas estimation
@@ -132,7 +140,8 @@ export async function buildMintUserOp({
   isDeployed,
   eoa,
   starkPubKeyX,
-  philTestMint,
+  philIdentityMint,
+  createProof,
   mintParams,
   paymasterAndData = "0x",
   provider,
@@ -159,12 +168,12 @@ export async function buildMintUserOp({
   });
 
   // ── Encode execute wrapper ──
-  const callData = encodeExecuteCalldata(ethers, philTestMint, 0, mintCalldata);
+  const callData = encodeExecuteCalldata(ethers, philIdentityMint, 0, mintCalldata);
 
   // ── InitCode (only if account not yet deployed) ──
   const initCode = isDeployed
     ? "0x"
-    : encodeInitCode(ethers, factoryAddress, eoa, starkPubKeyX);
+    : encodeInitCode(ethers, factoryAddress, eoa, starkPubKeyX, createProof);
 
   // ── Get nonce from EntryPoint ──
   let nonce = "0x0";
@@ -185,7 +194,7 @@ export async function buildMintUserOp({
 
   // If account needs deployment, increase verification gas
   if (!isDeployed) {
-    verificationGas = 1000000n;
+    verificationGas = 1300000n;
   }
 
   // ── Fee data ──

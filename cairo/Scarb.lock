@@ -2,5 +2,5 @@
 version = 1
 
 [[package]]
-name = "phil_allowlist"
+name = "phil_eligibility"
 version = "0.1.0"

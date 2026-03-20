@@ -6,15 +6,14 @@ import {IProofGate} from "./IProofGate.sol";
 
 interface IPhilAccountInit {
     function initialize(address newOwner) external payable;
-    function initVaultConfig(address unlockInbox_, address philTestMint_, address proofVerifier_) external;
+    function initVaultConfig(address unlockInbox_, address philIdentityMint_, address legacyProofVerifier_) external;
 }
 
 /// @title PhilAccountFactory
 /// @notice Deterministic CREATE2 factory for PhilAccount smart accounts.
-/// @dev Account creation is proof-gated through ProofGateTest13 ACTION_ACCOUNT_CREATE.
+/// @dev Account creation is proof-gated through PhilIdentityGate ACTION_ACCOUNT_CREATE.
 contract PhilAccountFactory is ERC4337Factory {
     uint8 internal constant ACTION_ACCOUNT_CREATE = 2;
-    uint8 internal constant ACTION_ACCOUNT_EXECUTE = 3;
 
     // ─────────────────────────────────────────────────────────────
     // Immutables
@@ -23,8 +22,8 @@ contract PhilAccountFactory is ERC4337Factory {
     /// @notice Unlock inbox address (L1) for STARK unlock tickets
     address public immutable unlockInbox;
 
-    /// @notice PhilTestMint contract address
-    address public immutable philTestMint;
+    /// @notice PhilIdentityMint contract address
+    address public immutable philIdentityMint;
 
     /// @notice Shared proof gate used across mint and account paths
     IProofGate public immutable proofGate;
@@ -46,16 +45,9 @@ contract PhilAccountFactory is ERC4337Factory {
         uint256 starkPubKeyX
     );
 
-    event ExecutionProofConsumed(
-        address indexed account,
-        address indexed recipient,
-        bytes32 indexed actionHash,
-        bytes32 factHash
-    );
-
     error AccountDeployFailed();
-    error UnknownPhilAccount();
     error ProofRequired();
+    error BackendExecutionProofDisabled();
 
     // ─────────────────────────────────────────────────────────────
     // Constructor
@@ -63,16 +55,16 @@ contract PhilAccountFactory is ERC4337Factory {
 
     /// @param implementation_ The PhilAccount implementation contract address
     /// @param unlockInbox_ The L1 unlock inbox address
-    /// @param philTestMint_ The PhilTestMint contract address
+    /// @param philIdentityMint_ The PhilIdentityMint contract address
     /// @param proofGate_ The shared proof gate contract
     constructor(
         address implementation_,
         address unlockInbox_,
-        address philTestMint_,
+        address philIdentityMint_,
         address proofGate_
     ) payable ERC4337Factory(implementation_) {
         unlockInbox = unlockInbox_;
-        philTestMint = philTestMint_;
+        philIdentityMint = philIdentityMint_;
         proofGate = IProofGate(proofGate_);
     }
 
@@ -91,7 +83,7 @@ contract PhilAccountFactory is ERC4337Factory {
     /// @notice Deploy a PhilAccount for the given owner and STARK key with proof gating.
     /// @param owner The EOA address that co-signs transactions
     /// @param starkPubKeyX The STARK public key X-coordinate
-    /// @param proof Shared proof payload consumed by ProofGateTest13
+    /// @param proof Shared proof payload consumed by PhilIdentityGate
     /// @return account The deployed (or existing) account address
     function createPhilAccount(
         address owner,
@@ -102,18 +94,11 @@ contract PhilAccountFactory is ERC4337Factory {
         proofGate.verifyActionAndConsume(owner, ACTION_ACCOUNT_CREATE, actionHash, proof);
 
         bytes32 salt = computeSalt(owner, starkPubKeyX);
-        account = getAddress(salt);
-        if (account.code.length == 0) {
-            account = _deployProxy(salt);
-            IPhilAccountInit(account).initialize{value: msg.value}(owner);
-        } else if (msg.value != 0) {
-            (bool valueForwarded,) = account.call{value: msg.value}("");
-            require(valueForwarded, "ETH transfer failed");
-        }
+        account = createAccount(owner, salt);
 
         isPhilAccount[account] = true;
 
-        // Configure vault inbox + mint target + proof verifier if not already set
+        // Configure vault inbox + mint target if not already set.
         (bool success, bytes memory data) = account.staticcall(
             abi.encodeWithSignature("unlockInbox()")
         );
@@ -124,8 +109,8 @@ contract PhilAccountFactory is ERC4337Factory {
                     abi.encodeWithSignature(
                         "initVaultConfig(address,address,address)",
                         unlockInbox,
-                        philTestMint,
-                        address(this)
+                        philIdentityMint,
+                        address(0)
                     )
                 );
                 require(success, "initVaultConfig failed");
@@ -134,15 +119,13 @@ contract PhilAccountFactory is ERC4337Factory {
         }
     }
 
-    /// @notice Called by PhilAccount contracts to consume ACTION_ACCOUNT_EXECUTE proofs.
+    /// @notice Legacy backend execution-proof relay is permanently disabled.
     function consumeExecutionProof(
-        address recipient,
-        bytes32 actionHash,
-        IProofGate.MintProof calldata proof
-    ) external {
-        if (!isPhilAccount[msg.sender]) revert UnknownPhilAccount();
-        proofGate.verifyActionAndConsume(recipient, ACTION_ACCOUNT_EXECUTE, actionHash, proof);
-        emit ExecutionProofConsumed(msg.sender, recipient, actionHash, proof.factHash);
+        address,
+        bytes32,
+        IProofGate.MintProof calldata
+    ) external pure {
+        revert BackendExecutionProofDisabled();
     }
 
     /// @notice Claim hash action binding for account creation.
@@ -183,7 +166,7 @@ contract PhilAccountFactory is ERC4337Factory {
     }
 
     function getAddress(bytes32 salt) public view override returns (address) {
-        return _predictProxyAddress(salt);
+        return super.getAddress(salt);
     }
 
     function _predictProxyAddress(bytes32 salt) internal view returns (address) {

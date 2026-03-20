@@ -13,10 +13,9 @@ import {ISharpFactRegistry} from "./ISharpFactRegistry.sol";
 ///        Mainnet: 0x47312450B3Ac8b5b8e247a6bB6d523e7a9E80E50
 ///        Sepolia: 0x07ec0D28e50322Eb0C159B9090ecF3aeA8346DFe
 ///
-///      Fact format (must match cairo/src/allowlist.cairo outputs):
+///      Fact format (must match cairo/src/eligibility.cairo outputs):
 ///        fact = keccak256(abi.encode(programHash, outputsHash))
-///        outputsHash = keccak256(abi.encodePacked(output[0], output[1], ..., output[5]))
-///        outputs = [root, drop_id, recipient, nullifier, leaf, idx] (each uint256)
+///        outputsHash = keccak256(abi.encodePacked(output[0], output[1], ..., output[n]))
 contract DevProofVerifier is ISharpFactRegistry {
     // ─────────────────────────────────────────────────────────────
     // DEV GUARD — prevents accidental production use
@@ -105,14 +104,12 @@ contract DevProofVerifier is ISharpFactRegistry {
     // Utility: compute expected fact from program hash + outputs
     // ─────────────────────────────────────────────────────────────
 
-    /// @notice Compute the SHARP fact hash from a Cairo program hash and 6 public outputs.
-    /// @dev Matches the format expected by the allowlist Cairo program outputs:
-    ///      outputs = [root, drop_id, recipient, nullifier, leaf, idx]
-    ///      outputsHash = keccak256(abi.encodePacked(outputs))
+    /// @notice Compute the fact hash from a Cairo program hash and public outputs.
+    /// @dev outputsHash = keccak256(abi.encodePacked(outputs))
     ///      fact = keccak256(abi.encode(programHash, outputsHash))
     function computeFact(
         bytes32 programHash,
-        uint256[6] calldata outputs
+        uint256[] calldata outputs
     ) external pure returns (bytes32) {
         bytes32 outputsHash = keccak256(abi.encodePacked(outputs));
         return keccak256(abi.encode(programHash, outputsHash));

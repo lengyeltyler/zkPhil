@@ -1,5 +1,6 @@
 const PHIL_IDS = [0, 1, 2, 3, 4, 5];
 const PALETTE_VARIANTS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const MIX_MODES = [0, 1, 2];
 const DEFAULT_FEED_LENGTH = 240;
 const DEFAULT_MIX_PERCENT = 20;
 const GOLDEN_FEED_SEED = 0x7f4a7c15;
@@ -113,6 +114,54 @@ export function buildFeedSequence({
     length,
     mixPercent,
     baseComboCount: baseCombos.length,
+    items,
+  };
+}
+
+function lcg32(seed) {
+  return (Math.imul(seed >>> 0, 1664525) + 1013904223) >>> 0;
+}
+
+function deterministicPreviewSeed(index) {
+  const seeded = lcg32(normalizeSeed(GOLDEN_FEED_SEED ^ Number(index)));
+  return seeded === 0 ? GOLDEN_FEED_SEED : seeded;
+}
+
+export function buildScrollPreviewFeed({ startIndex = 0, length = DEFAULT_FEED_LENGTH }) {
+  if (!Number.isInteger(startIndex) || startIndex < 0) {
+    throw new Error(`startIndex must be >= 0, got ${startIndex}`);
+  }
+  if (!Number.isInteger(length) || length < 1) {
+    throw new Error(`length must be >= 1, got ${length}`);
+  }
+
+  const perCycle = PHIL_IDS.length * PALETTE_VARIANTS.length * MIX_MODES.length;
+  const items = [];
+
+  for (let i = 0; i < length; i += 1) {
+    const absoluteIndex = startIndex + i;
+    const cycleIndex = absoluteIndex % perCycle;
+    const philId = PHIL_IDS[Math.floor(cycleIndex / (PALETTE_VARIANTS.length * MIX_MODES.length))];
+    const paletteVariant = PALETTE_VARIANTS[
+      Math.floor(cycleIndex / MIX_MODES.length) % PALETTE_VARIANTS.length
+    ];
+    const mixMode = MIX_MODES[cycleIndex % MIX_MODES.length];
+    const mixSeed = deterministicPreviewSeed(absoluteIndex + 1);
+
+    items.push({
+      index: absoluteIndex,
+      key: `scroll-preview:${absoluteIndex}`,
+      philId,
+      paletteVariant,
+      mixMode,
+      mixSeed,
+      label: `Phil ${philId} · Palette ${paletteVariant} · Mix ${mixMode} · Seed ${mixSeed}`,
+    });
+  }
+
+  return {
+    startIndex,
+    length,
     items,
   };
 }

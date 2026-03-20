@@ -1,0 +1,33 @@
+{
+  "name": "phil-eligibility-server",
+  "version": "1.0.0",
+  "description": "Eligibility proving request server for Phil identity issuance",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "preinstall": "node ../scripts/check-node-version.mjs",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "npm --prefix .. run compile && vitest --run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "fastify": "^4.26.0",
+    "@fastify/cors": "^9.0.1",
+    "better-sqlite3": "^9.4.0",
+    "ethers": "^6.11.0",
+    "dotenv": "^16.4.0",
+    "starknet": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0",
+    "tsx": "^4.7.0",
+    "vitest": "^1.2.0"
+  }
+}
