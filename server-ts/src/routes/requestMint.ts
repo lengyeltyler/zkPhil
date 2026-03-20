@@ -15,6 +15,7 @@ const ACTION_ACCOUNT_CREATE = 2;
 interface BaseProofBody {
   kind?: 'mint' | 'action';
   recipient: string;
+  mockHumanId?: string;
 }
 
 interface MintProofBody extends BaseProofBody {
@@ -42,27 +43,38 @@ interface MintProofPayload {
 }
 
 interface ProvingRequestPayload {
-  schema: 'zkphil-local-proof-request-v2';
+  schema: 'zkphil-local-proof-request-v3';
   provingMode: 'scarb-stwo';
-  provider: 'local-credential-commitment';
+  provider: 'local-credential-commitment' | 'mock-humanity';
+  providerMode: 'local-credential' | 'mock-humanity';
   kind: 'mint' | 'action';
   claimKind: number;
   recipient: string;
   verifierConfigHash: string;
-  credentialSecret: string;
+  credentialSecret?: string;
+  humanitySecret?: string;
   commitmentWitness: {
     commitmentRoot: string;
     siblings: string[];
     pathIndices: number[];
+  };
+  identitySource: {
+    kind: 'recipient' | 'mock-human';
+    value: string;
+    label: string;
+    mockHumanId?: string;
   };
   claimHash: string;
   expectedFactHash: string;
   expectedProofMetadata: string;
   expectedIdentityNullifier: string;
   expectedCredentialCommitment: string;
+  expectedHumanityCommitment?: string;
   programHash: string;
   proofContext: string;
   expiry: string;
+  mockHumanId?: string;
+  mockHumanIdHash?: string;
 }
 
 interface RequestMintSuccess {
@@ -79,6 +91,8 @@ interface RequestMintSuccess {
   proofId?: string;
   actionType?: number;
   actionHash?: string;
+  humanityProvider?: string;
+  mockHumanId?: string;
 }
 
 interface RequestMintFailure {
@@ -153,6 +167,8 @@ function successPayload(
     actionHash?: string;
     mintToComputed?: string;
     proofId?: string;
+    humanityProvider?: string;
+    mockHumanId?: string;
   }
 ): RequestMintSuccess {
   return {
@@ -306,6 +322,7 @@ export default async function requestMintRoute(
             mixSeed: { type: 'integer', minimum: 0, maximum: 4294967295 },
             actionType: { type: 'integer', minimum: 1, maximum: 255 },
             actionHash: { type: 'string', pattern: '^0x[a-fA-F0-9]{64}$' },
+            mockHumanId: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' },
           },
         },
       },
@@ -361,7 +378,10 @@ export default async function requestMintRoute(
           const credential = await eligibilityProvider.selectCredential(
             proofContext.toString(),
             recipient,
-            body.actionType
+            body.actionType,
+            {
+              mockHumanId: body.mockHumanId,
+            }
           );
           const proofPayload = await buildProofPayload({
             programHash,
@@ -370,8 +390,11 @@ export default async function requestMintRoute(
             claimHash,
             claimKind: body.actionType,
             verifierConfigHash: credential.verifierConfigHash,
-            secret: credential.credentialSecret,
+            secret: credential.humanitySecret ?? credential.credentialSecret,
             expiry,
+            providerMode: credential.providerMode,
+            identitySubject: credential.identitySource.value,
+            mockHumanIdHash: credential.mockHumanIdHash,
           });
           const proof = {
             expiry: normalizeHexUint256(expiry).toLowerCase(),
@@ -379,32 +402,55 @@ export default async function requestMintRoute(
             signature: proofPayload.signature.toLowerCase(),
           };
           const provingRequest: ProvingRequestPayload = {
-            schema: 'zkphil-local-proof-request-v2',
+            schema: 'zkphil-local-proof-request-v3',
             provingMode: 'scarb-stwo',
-            provider: 'local-credential-commitment',
+            provider: credential.provider,
+            providerMode: credential.providerMode,
             kind,
             claimKind: body.actionType,
             recipient,
             verifierConfigHash: normalizeHexUint256(credential.verifierConfigHash),
-            credentialSecret: normalizeHexUint256(credential.credentialSecret),
+            credentialSecret: credential.credentialSecret != null
+              ? normalizeHexUint256(credential.credentialSecret)
+              : undefined,
+            humanitySecret: credential.humanitySecret != null
+              ? normalizeHexUint256(credential.humanitySecret)
+              : undefined,
             commitmentWitness: {
               commitmentRoot: normalizeHexUint256(credential.commitmentWitness.commitmentRoot),
               siblings: credential.commitmentWitness.siblings.map(normalizeHexUint256),
               pathIndices: credential.commitmentWitness.pathIndices,
+            },
+            identitySource: {
+              kind: credential.identitySource.kind,
+              value: normalizeHexUint256(credential.identitySource.value),
+              label: credential.identitySource.label,
+              ...(credential.identitySource.mockHumanId
+                ? { mockHumanId: credential.identitySource.mockHumanId }
+                : {}),
             },
             claimHash: claimHash.toLowerCase(),
             expectedFactHash: proof.factHash,
             expectedProofMetadata: proof.signature,
             expectedIdentityNullifier: normalizeHexUint256(proofPayload.publicOutputs.identityNullifier),
             expectedCredentialCommitment: normalizeHexUint256(proofPayload.publicOutputs.credentialCommitment),
+            expectedHumanityCommitment: credential.providerMode === 'mock-humanity'
+              ? normalizeHexUint256(proofPayload.publicOutputs.credentialCommitment)
+              : undefined,
             programHash,
             proofContext: normalizeHexUint256(proofContext),
             expiry: proof.expiry,
+            mockHumanId: credential.mockHumanId,
+            mockHumanIdHash: credential.mockHumanIdHash != null
+              ? normalizeHexUint256(credential.mockHumanIdHash)
+              : undefined,
           };
 
           return successPayload('action', recipient, claimHash, proof, provingRequest, {
             actionType: body.actionType,
             actionHash: normalizeBytes32(body.actionHash),
+            humanityProvider: credential.providerMode,
+            mockHumanId: credential.mockHumanId,
           });
         }
 
@@ -448,7 +494,10 @@ export default async function requestMintRoute(
         const credential = await eligibilityProvider.selectCredential(
           proofContext.toString(),
           recipient,
-          1
+          1,
+          {
+            mockHumanId: body.mockHumanId,
+          }
         );
         const proofPayload = await buildProofPayload({
           programHash,
@@ -457,8 +506,11 @@ export default async function requestMintRoute(
           claimHash,
           claimKind: 1,
           verifierConfigHash: credential.verifierConfigHash,
-          secret: credential.credentialSecret,
+          secret: credential.humanitySecret ?? credential.credentialSecret,
           expiry,
+          providerMode: credential.providerMode,
+          identitySubject: credential.identitySource.value,
+          mockHumanIdHash: credential.mockHumanIdHash,
         });
 
         const proof = {
@@ -488,32 +540,55 @@ export default async function requestMintRoute(
         db.createIssuedMintProof(issuedMintProof);
 
         const provingRequest: ProvingRequestPayload = {
-          schema: 'zkphil-local-proof-request-v2',
+          schema: 'zkphil-local-proof-request-v3',
           provingMode: 'scarb-stwo',
-          provider: 'local-credential-commitment',
+          provider: credential.provider,
+          providerMode: credential.providerMode,
           kind,
           claimKind: 1,
           recipient,
           verifierConfigHash: normalizeHexUint256(credential.verifierConfigHash),
-          credentialSecret: normalizeHexUint256(credential.credentialSecret),
+          credentialSecret: credential.credentialSecret != null
+            ? normalizeHexUint256(credential.credentialSecret)
+            : undefined,
+          humanitySecret: credential.humanitySecret != null
+            ? normalizeHexUint256(credential.humanitySecret)
+            : undefined,
           commitmentWitness: {
             commitmentRoot: normalizeHexUint256(credential.commitmentWitness.commitmentRoot),
             siblings: credential.commitmentWitness.siblings.map(normalizeHexUint256),
             pathIndices: credential.commitmentWitness.pathIndices,
+          },
+          identitySource: {
+            kind: credential.identitySource.kind,
+            value: normalizeHexUint256(credential.identitySource.value),
+            label: credential.identitySource.label,
+            ...(credential.identitySource.mockHumanId
+              ? { mockHumanId: credential.identitySource.mockHumanId }
+              : {}),
           },
           claimHash: claimHash.toLowerCase(),
           expectedFactHash: proof.factHash,
           expectedProofMetadata: proof.signature,
           expectedIdentityNullifier: normalizeHexUint256(proofPayload.publicOutputs.identityNullifier),
           expectedCredentialCommitment: normalizeHexUint256(proofPayload.publicOutputs.credentialCommitment),
+          expectedHumanityCommitment: credential.providerMode === 'mock-humanity'
+            ? normalizeHexUint256(proofPayload.publicOutputs.credentialCommitment)
+            : undefined,
           programHash,
           proofContext: normalizeHexUint256(proofContext),
           expiry: proof.expiry,
+          mockHumanId: credential.mockHumanId,
+          mockHumanIdHash: credential.mockHumanIdHash != null
+            ? normalizeHexUint256(credential.mockHumanIdHash)
+            : undefined,
         };
 
         return successPayload('mint', recipient, claimHash, proof, provingRequest, {
           mintToComputed,
           proofId,
+          humanityProvider: credential.providerMode,
+          mockHumanId: credential.mockHumanId,
         });
       } catch (error) {
         if (error instanceof EligibilityAccessError) {

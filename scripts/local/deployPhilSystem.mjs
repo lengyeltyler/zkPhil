@@ -8,6 +8,11 @@ import {
   SVG_SINGLE_UPLOAD_LIMIT,
   SVG_STORAGE_CHUNK_LIMIT,
 } from '../../src/layer-catalog.mjs';
+import {
+  HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
+  HUMANITY_PROVIDER_LOCAL_CREDENTIAL_COMMITMENT,
+  HUMANITY_PROVIDER_MOCK,
+} from '../../shared/proof/localStarkProver.mjs';
 import { logTx, waitForReceiptWithTimeout } from '../sepolia/txutil.mjs';
 import {
   DryRunPlanner,
@@ -31,6 +36,22 @@ const REGISTER_ASSET_BATCH_SIZE = 40;
 const REGISTER_VARIANT_BATCH_SIZE = 20;
 const SEPOLIA_ADDRESSES_PATH = path.join(ROOT_DIR, 'deployments', 'sepolia-addresses.json');
 const ZK_PHIL_LAYERS_DIR = path.join(ROOT_DIR, 'zkPhilLayers');
+
+function normalizeHumanityProviderMode(rawValue) {
+  const normalized = String(rawValue || HUMANITY_PROVIDER_LOCAL_CREDENTIAL).trim().toLowerCase();
+  if (
+    normalized === HUMANITY_PROVIDER_LOCAL_CREDENTIAL ||
+    normalized === HUMANITY_PROVIDER_LOCAL_CREDENTIAL_COMMITMENT ||
+    normalized === 'credential' ||
+    normalized === 'local'
+  ) {
+    return HUMANITY_PROVIDER_LOCAL_CREDENTIAL;
+  }
+  if (normalized === HUMANITY_PROVIDER_MOCK || normalized === 'mock') {
+    return HUMANITY_PROVIDER_MOCK;
+  }
+  throw new Error(`Unsupported HUMANITY_PROVIDER=${rawValue}`);
+}
 
 function getArtifact(artifacts, name) {
   const artifact = artifacts[name];
@@ -567,14 +588,16 @@ export async function deployPhilSystem({
   proofContext = BigInt(process.env.PROOF_CONTEXT || process.env.CONTEXT_ID || '13'),
   factRegistryAddress = process.env.FACT_REGISTRY || '',
   verifierConfigHash = process.env.VERIFIER_CONFIG_HASH || process.env.ELIGIBILITY_ROOT || '',
+  humanityProvider = process.env.HUMANITY_PROVIDER || HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
   credentialBundlePath = process.env.CREDENTIAL_BUNDLE_PATH || process.env.ELIGIBILITY_BUNDLE_PATH || '',
+  mockHumanityBundlePath = process.env.MOCK_HUMANITY_BUNDLE_PATH || process.env.HUMANITY_BUNDLE_PATH || '',
   svgStorageAddress = process.env.PHIL_SVG_STORAGE || '',
   layerRegistryAddress = process.env.PHIL_LAYER_REGISTRY || '',
   writeDeployments = true,
   dryRun = false,
   dryRunPlanner = null,
 }) {
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { batchMaxCount: 1 });
   const rawWallet = new ethers.Wallet(privateKey, provider);
   const wallet = new ethers.NonceManager(rawWallet);
   const deployer = await rawWallet.getAddress();
@@ -600,9 +623,11 @@ export async function deployPhilSystem({
   const rendererArtifact = getArtifact(artifacts, 'PhilRenderer');
   const devProofVerifierArtifact = getArtifact(artifacts, 'DevProofVerifier');
   const humanityVerifierArtifact = getArtifact(artifacts, 'FactRegistryHumanityVerifier');
+  const mockHumanityVerifierArtifact = getArtifact(artifacts, 'MockHumanityVerifier');
   const proofGateArtifact = getArtifact(artifacts, 'PhilIdentityGate');
   const mintArtifact = getArtifact(artifacts, 'PhilIdentityMint');
   const web3Artifact = getArtifact(artifacts, 'PhilWeb3');
+  const resolvedHumanityProvider = normalizeHumanityProviderMode(humanityProvider);
 
   const artBackend = await resolveArtBackend({
     chainId,
@@ -633,11 +658,19 @@ export async function deployPhilSystem({
 
   const resolvedVerifierConfigHash = (() => {
     if (verifierConfigHash) return BigInt(verifierConfigHash);
+    if (resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK && mockHumanityBundlePath) {
+      const bundle = JSON.parse(fs.readFileSync(path.resolve(mockHumanityBundlePath), 'utf8'));
+      return BigInt(bundle.verifierConfigHash);
+    }
     if (credentialBundlePath) {
       const bundle = JSON.parse(fs.readFileSync(path.resolve(credentialBundlePath), 'utf8'));
       return BigInt(bundle.verifierConfigHash);
     }
-    throw new Error('VERIFIER_CONFIG_HASH or CREDENTIAL_BUNDLE_PATH must be set for humanity verifier deployment.');
+    throw new Error(
+      resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK
+        ? 'VERIFIER_CONFIG_HASH or MOCK_HUMANITY_BUNDLE_PATH must be set for mock-humanity verifier deployment.'
+        : 'VERIFIER_CONFIG_HASH or CREDENTIAL_BUNDLE_PATH must be set for humanity verifier deployment.'
+    );
   })();
 
   const nextEoaNonce = dryRun ? planner.nextNonce : Number(await wallet.getNonce());
@@ -667,17 +700,29 @@ export async function deployPhilSystem({
     resolvedFactRegistryAddress = registry.address;
   }
 
+  if (resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK && chainId !== LOCAL_CHAIN_ID) {
+    throw new Error('HUMANITY_PROVIDER=mock is DEV/TEST ONLY and may only be deployed on chainId 31337.');
+  }
+
+  const verifierArtifact =
+    resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK
+      ? mockHumanityVerifierArtifact
+      : humanityVerifierArtifact;
+  const verifierContractName =
+    resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK
+      ? 'MockHumanityVerifier'
+      : 'FactRegistryHumanityVerifier';
   const verifier = await deployContract({
     wallet,
     provider,
-    artifact: humanityVerifierArtifact,
+    artifact: verifierArtifact,
     args: [
       programHash,
       proofContext,
       resolvedFactRegistryAddress,
       resolvedVerifierConfigHash,
     ],
-    contractName: 'FactRegistryHumanityVerifier',
+    contractName: verifierContractName,
     dryRun,
     dryRunPlanner: planner,
     from: deployer,
@@ -729,6 +774,7 @@ export async function deployPhilSystem({
     deployer,
     factRegistry: resolvedFactRegistryAddress,
     humanityVerifier: verifier.address,
+    humanityProvider: resolvedHumanityProvider,
     verifierConfigHash: resolvedVerifierConfigHash.toString(),
     programHash,
     proofContext: proofContext.toString(),
@@ -736,7 +782,10 @@ export async function deployPhilSystem({
     PhilLayerRegistry: artBackend.layerRegistryAddress,
     PhilNFT: artBackend.philNftAddress,
     PhilRenderer: renderer.address,
-    FactRegistryHumanityVerifier: verifier.address,
+    FactRegistryHumanityVerifier:
+      resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK ? '' : verifier.address,
+    MockHumanityVerifier:
+      resolvedHumanityProvider === HUMANITY_PROVIDER_MOCK ? verifier.address : '',
     PhilIdentityGate: gate.address,
     PhilIdentityMint: mint.address,
     PhilWeb3: web3.address,

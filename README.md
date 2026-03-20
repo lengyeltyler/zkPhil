@@ -1,38 +1,73 @@
 # zkPhil
 
-zkPhil stays Ethereum-native and uses local Cairo + S-two proving for Phil identity issuance.
+zkPhil stays Ethereum-native and keeps local Cairo + S-two proving at the center of Phil identity issuance.
 
-The active architecture is now humanity-ready:
+The repo now supports two humanity-provider modes behind the same gate and fact-registry bridge:
 
-- `PhilIdentityGate` is the identity/nullifier gate.
-- `FactRegistryHumanityVerifier` is the current proof bridge implementation.
-- the current local provider is a credential-commitment bundle proved locally in Cairo
-- future proof-of-human providers such as World can plug in behind the humanity-verifier abstraction
-- no backend signer authorizes minting anymore
+- `HUMANITY_PROVIDER=local-credential`
+  - production-oriented bridge mode for the current local credential-commitment flow
+- `HUMANITY_PROVIDER=mock`
+  - DEV/TEST ONLY mock-humanity mode for end-to-end Phil identity testing
 
-World or any other third-party proof-of-human provider is not implemented in this repo yet.
+World / World ID is still not implemented here.
+No external World services are called.
+The active verifier bridge is still fact-registry-based.
 
-## Identity flow
+## Active identity architecture
 
-1. `POST /request-mint` returns a recipient-bound `provingRequest`.
-2. The browser sends that request to the local prover at [`scripts/proofs/local_prover_server.mjs`](./scripts/proofs/local_prover_server.mjs).
-3. Cairo runs locally and emits an S-two proof artifact plus the contract proof payload.
-4. The client sends the proof payload to `POST /register-proof`.
-5. [`contracts/PhilIdentityGate.sol`](./contracts/PhilIdentityGate.sol) accepts only fact-registry-backed proofs and consumes the identity nullifier.
+- `PhilIdentityGate` is the provider-agnostic nullifier and replay gate.
+- `IHumanityVerifier` is the verifier abstraction.
+- `FactRegistryHumanityVerifier` is the production-oriented fact-registry verifier.
+- `MockHumanityVerifier` is the DEV/TEST-ONLY local verifier for `HUMANITY_PROVIDER=mock`.
+- Cairo + S-two still generate the proof artifact and public outputs.
+- the backend prepares proving requests but is not a mint-signing trust root.
 
-## Current verifier model
+## Mock-humanity mode
 
-- [`contracts/IHumanityVerifier.sol`](./contracts/IHumanityVerifier.sol) defines the provider-agnostic verifier abstraction.
-- [`contracts/proofs/FactRegistryHumanityVerifier.sol`](./contracts/proofs/FactRegistryHumanityVerifier.sol) is the current implementation.
-- [`cairo/src/credential.cairo`](./cairo/src/credential.cairo) proves a recipient-bound credential commitment against the current verifier config hash.
-- the verifier config hash is currently a Merkle commitment root for the local credential bundle, but that is an implementation detail, not the product model
+`HUMANITY_PROVIDER=mock` simulates future proof-of-human semantics with:
 
-## Local proving commands
+- `mockHumanId`
+- `humanitySecret`
+- deterministic `identityNullifier`
+- recipient-bound claim hashes
+- one-human-one-identity nullifier consumption
 
-Build a credential bundle:
+This mode is only for local development and testing on `31337`.
+It is not production security and it is not World ID.
+
+## End-to-end flow
+
+1. Authenticate the wallet with the backend.
+2. Choose a mock human in DEV/TEST mode or use the local credential provider.
+3. `POST /request-mint` returns a recipient-bound proving request.
+4. The client sends that request to the local prover at [`scripts/proofs/local_prover_server.mjs`](./scripts/proofs/local_prover_server.mjs).
+5. Cairo executes locally and emits an S-two artifact plus the contract proof payload.
+6. The client sends the resulting proof payload to `POST /register-proof`.
+7. `FactRegistryHumanityVerifier` or `MockHumanityVerifier` checks the registered fact.
+8. [`contracts/PhilIdentityGate.sol`](./contracts/PhilIdentityGate.sol) consumes the identity nullifier.
+
+## Core commands
+
+Install dependencies:
 
 ```bash
-node scripts/proofs/build_credential_bundle.mjs \
+npm install
+cd server-ts && npm install && cd ..
+```
+
+Build a DEV/TEST mock-humanity bundle:
+
+```bash
+npm run proofs:build-mock-bundle -- \
+  --in fixtures/mock_humans.dev.json \
+  --out artifacts/proofs/mock-humanity-bundle.json \
+  --proofContext 13
+```
+
+Build the original local-credential bundle:
+
+```bash
+npm run proofs:build-bundle -- \
   --in credentials.json \
   --out artifacts/proofs/credential-bundle.json \
   --proofContext 13
@@ -41,66 +76,76 @@ node scripts/proofs/build_credential_bundle.mjs \
 Run the local prover service:
 
 ```bash
-node scripts/proofs/local_prover_server.mjs
-```
-
-Generate and optionally verify one proof artifact:
-
-```bash
-node scripts/proofs/prove_local.mjs \
-  --request artifacts/proofs/request.json \
-  --out artifacts/proofs/local-proof-artifact.json \
-  --prove
-
-node scripts/proofs/prove_local.mjs \
-  --request artifacts/proofs/request.json \
-  --out artifacts/proofs/local-proof-artifact.json \
-  --prove --verify
-```
-
-## Setup
-
-```bash
-npm install
-cd server-ts && npm install && cd ..
-cp .env.example .env
-```
-
-Minimum local-proving env:
-
-- `RPC_URL`
-- `CHAIN_ID`
-- `PRIVATE_KEY`
-- `PROGRAM_HASH`
-- `PROOF_CONTEXT`
-- `CREDENTIAL_BUNDLE_PATH`
-- `PAYMASTER_SIGNER_KEY`
-
-Local `31337` also needs:
-
-- `FACT_REGISTRY_OPERATOR_KEY`
-
-Public chains also need:
-
-- `FACT_REGISTRY`
-
-## Common commands
-
-```bash
-npm run compile
-scarb --manifest-path cairo/Scarb.toml test
-cd server-ts && npx vitest --run
-npm run test:node
-npm run test:hardhat
-npm run test:legacy
-npm run proofs:build-bundle
 npm run proofs:prove-server
 ```
 
-## Key docs
+Run the mock-humanity smoke flow after the chain, backend, and prover are up:
+
+```bash
+npm run local:mock-flow
+```
+
+## Local dev quick start
+
+Helper script:
+
+```bash
+bash scripts/run_local_e2e.sh up
+```
+
+That helper bootstraps:
+
+- local Hardhat chain
+- mock-humanity bundle
+- contract deployments
+- local prover
+- backend
+
+Then serve the static frontend:
+
+```bash
+npx serve . -l 8080
+```
+
+Open:
+
+```text
+http://localhost:8080/frontend/mint.html?chainId=31337&server=http://127.0.0.1:8787&localProver=http://127.0.0.1:8747
+```
+
+Stop the helper-managed services:
+
+```bash
+bash scripts/run_local_e2e.sh down
+```
+
+For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md).
+
+## Environment highlights
+
+- `HUMANITY_PROVIDER`
+- `HUMANITY_BUNDLE_PATH`
+- `CREDENTIAL_BUNDLE_PATH`
+- `MOCK_HUMANITY_BUNDLE_PATH`
+- `PROOF_CONTEXT`
+- `FACT_REGISTRY`
+- `FACT_REGISTRY_OPERATOR_KEY`
+- `LOCAL_PROVER_HOST`
+- `LOCAL_PROVER_PORT`
+
+See [`.env.example`](./.env.example) for the full template.
+
+## Relevant tests
+
+```bash
+scarb --manifest-path cairo/Scarb.toml test
+cd server-ts && npx vitest --run src/lib/eligibility.test.ts src/routes/status.test.ts src/routes/requestMint.test.ts src/routes/requestMint.production.test.ts src/routes/signPaymaster.test.ts
+node --test test/eligibility-proof.contract.test.mjs test/mock-humanity.contract.test.mjs test/error-cases.contract.test.mjs test/verify-sepolia-bindings.test.mjs
+```
+
+## Docs
 
 - Architecture: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
+- DEV runbook: [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)
-- Refactor summary: [`REFRACTOR_SUMMARY.md`](./REFRACTOR_SUMMARY.md)
 - Humanity-ready summary: [`HUMANITY_READY_SUMMARY.md`](./HUMANITY_READY_SUMMARY.md)
-- Review packet: [`REVIEW_PACKET.md`](./REVIEW_PACKET.md)

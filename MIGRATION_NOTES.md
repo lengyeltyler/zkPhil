@@ -2,23 +2,19 @@
 
 ## What changed
 
-- Phil mint authorization no longer depends on backend ECDSA signatures.
-- The active identity gate now depends on `IHumanityVerifier`.
-- The current verifier implementation is `FactRegistryHumanityVerifier`.
-- `MintProof.signature` now encodes:
-  - `abi.encode(uint256 identityNullifier, uint256 credentialCommitment)`
-- the local proving request moved from list-era fields to:
-  - `verifierConfigHash`
-  - `credentialSecret`
-  - `commitmentWitness`
-  - `expectedIdentityNullifier`
-  - `expectedCredentialCommitment`
-- the current Cairo program moved to [`cairo/src/credential.cairo`](./cairo/src/credential.cairo)
+- zkPhil now supports explicit provider modes through `HUMANITY_PROVIDER`.
+- `HUMANITY_PROVIDER=mock` adds a DEV/TEST-ONLY mock-humanity flow.
+- `HUMANITY_PROVIDER=local-credential` keeps the prior local credential-commitment flow.
+- proving requests moved to `zkphil-local-proof-request-v3`.
+- proof artifacts moved to `zkphil-stwo-proof-artifact-v3`.
 
 ## New preferred environment variables
 
-- `PROOF_CONTEXT`
+- `HUMANITY_PROVIDER`
+- `HUMANITY_BUNDLE_PATH`
 - `CREDENTIAL_BUNDLE_PATH`
+- `MOCK_HUMANITY_BUNDLE_PATH`
+- `PROOF_CONTEXT`
 - `VERIFIER_CONFIG_HASH`
 - `FACT_REGISTRY`
 - `FACT_REGISTRY_OPERATOR_KEY`
@@ -28,22 +24,32 @@
 - `LOCAL_PROVER_ENABLE_PROVE`
 - `LOCAL_PROVER_ENABLE_VERIFY`
 
-Legacy aliases such as `CONTEXT_ID`, `ELIGIBILITY_BUNDLE_PATH`, and `ELIGIBILITY_ROOT` are tolerated only as compatibility fallbacks in a few scripts.
+Legacy aliases such as `CONTEXT_ID`, `ELIGIBILITY_BUNDLE_PATH`, and `ELIGIBILITY_ROOT` are still tolerated in a few places as compatibility fallbacks.
 
-## Removed from the production authorization path
+## Mock-humanity additions
 
-- `ALLOWLIST_SIGNER`
+New bundle and request concepts:
+
+- `mockHumanId`
+- `mockHumanIdHash`
+- `humanitySecret`
+- `identitySource.kind = mock-human`
+- `expectedHumanityCommitment`
+
+## Still removed from the authorization path
+
+- backend mint-signing authority
 - `ALLOWLIST_SIGNER_KEY`
-- backend-issued mint signatures as a trust root
+- allowlist slot language as the conceptual identity model
 
-## Local proving workflow
+## Updated local mock-humanity workflow
 
-Build the credential bundle:
+Build the bundle:
 
 ```bash
-node scripts/proofs/build_credential_bundle.mjs \
-  --in credentials.json \
-  --out artifacts/proofs/credential-bundle.json \
+node scripts/proofs/build_mock_humanity_bundle.mjs \
+  --in fixtures/mock_humans.dev.json \
+  --out artifacts/proofs/mock-humanity-bundle.json \
   --proofContext 13
 ```
 
@@ -53,63 +59,50 @@ Start the local prover service:
 node scripts/proofs/local_prover_server.mjs
 ```
 
-Generate a proof artifact from a saved request:
+Execute the smoke flow after the chain and backend are running:
 
 ```bash
-node scripts/proofs/prove_local.mjs \
-  --request artifacts/proofs/request.json \
-  --out artifacts/proofs/local-proof-artifact.json \
-  --prove
+node scripts/local/mock_humanity_flow.mjs
 ```
 
-Optional proof verification:
+## Request artifact
 
-```bash
-node scripts/proofs/prove_local.mjs \
-  --request artifacts/proofs/request.json \
-  --out artifacts/proofs/local-proof-artifact.json \
-  --prove --verify
-```
-
-## Artifact formats
-
-### Request artifact
-
-`zkphil-local-proof-request-v2`
+`zkphil-local-proof-request-v3`
 
 Contains:
 
 - `provider`
-- `kind`
-- `claimKind`
-- `recipient`
-- `verifierConfigHash`
-- `credentialSecret`
+- `providerMode`
+- `credentialSecret` or `humanitySecret`
 - `commitmentWitness`
+- `identitySource`
 - `claimHash`
 - `expectedFactHash`
 - `expectedProofMetadata`
 - `expectedIdentityNullifier`
 - `expectedCredentialCommitment`
+- `expectedHumanityCommitment` in mock mode
 - `programHash`
 - `proofContext`
 - `expiry`
 
-### Proof artifact
+## Proof artifact
 
-`zkphil-stwo-proof-artifact-v2`
+`zkphil-stwo-proof-artifact-v3`
 
 Contains:
 
 - original `request`
+- `providerMode`
 - `contractProof`
 - `publicOutputs`
 - `outputs`
 - `proofStatus`
 - `scarb` command metadata
 
-## Current limitation
+## Current limitations
 
 - Direct Ethereum-side verification of S-two proof artifacts is still not implemented here.
-- The active production bridge is fact-registry-based verification.
-- Future proof-of-human providers such as World are intentionally not implemented yet.
+- The active verifier bridge is still fact-registry-based.
+- World / World ID is still intentionally unimplemented.
+- The local helper bootstrap may still need retries on some environments during the large local deploy path.

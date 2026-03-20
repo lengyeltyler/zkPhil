@@ -12,7 +12,7 @@
 
 pub mod credential;
 
-use credential::{CommitmentWitness, verify_credential_claim};
+use credential::{CommitmentWitness, verify_humanity_claim};
 use core::array::ArrayTrait;
 use core::traits::TryInto;
 
@@ -61,9 +61,13 @@ fn main(input: Array<felt252>) -> Array<felt252> {
     let claim_hash_lo = input_at(@input, i);
     i += 1;
     let claim_kind = input_at(@input, i);
+    i += 1;
+    let provider_mode = input_at(@input, i);
+    i += 1;
+    let identity_subject = input_at(@input, i);
 
     let witness = CommitmentWitness { siblings, path_indices };
-    verify_credential_claim(
+    verify_humanity_claim(
         secret,
         witness,
         commitment_root,
@@ -72,5 +76,7 @@ fn main(input: Array<felt252>) -> Array<felt252> {
         claim_hash_hi,
         claim_hash_lo,
         claim_kind,
+        provider_mode,
+        identity_subject,
     )
 }

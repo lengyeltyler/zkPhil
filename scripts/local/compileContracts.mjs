@@ -14,6 +14,7 @@ const ENTRY_FILES = [
   'contracts/PhilIdentityGate.sol',
   'contracts/proofs/DevProofVerifier.sol',
   'contracts/proofs/FactRegistryHumanityVerifier.sol',
+  'contracts/proofs/MockHumanityVerifier.sol',
   'contracts/PhilIdentityMint.sol',
   'contracts/Phil369CadenceMint.sol',
   'contracts/PhilWeb3.sol',

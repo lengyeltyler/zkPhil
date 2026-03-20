@@ -199,4 +199,18 @@ describe('production eligibility wiring', () => {
       await closeApp(app, db, cleanupBundle);
     }
   });
+
+  it('refuses to create a mock-humanity provider in production mode', async () => {
+    expect(() =>
+      createEligibilityProvider({
+        env: {
+          HUMANITY_PROVIDER: 'mock',
+          NODE_ENV: 'production',
+          CHAIN_ID: String(CHAIN_ID),
+          MOCK_HUMANITY_BUNDLE_PATH: '/tmp/does-not-matter.json',
+        } as NodeJS.ProcessEnv,
+        isNullifierSpent: async () => false,
+      })
+    ).toThrow(/DEV\/TEST ONLY/);
+  });
 });

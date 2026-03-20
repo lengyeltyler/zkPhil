@@ -1,0 +1,22 @@
+{
+  "seed": "zkphil-dev-mock-humans",
+  "proofContext": 13,
+  "humans": [
+    {
+      "mockHumanId": "atlas",
+      "label": "Atlas"
+    },
+    {
+      "mockHumanId": "briar",
+      "label": "Briar"
+    },
+    {
+      "mockHumanId": "cinder",
+      "label": "Cinder"
+    },
+    {
+      "mockHumanId": "delta",
+      "label": "Delta"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import requestMintRoute from './requestMint.js';
 import { createEligibilityProvider } from '../lib/eligibility.js';
 import { PhilDatabase } from '../lib/db.js';
 import { buildCredentialBundle } from '../../../shared/proof/credentialBundle.mjs';
+import { buildMockHumanityBundle } from '../../../shared/proof/mockHumanityBundle.mjs';
 import { buildProofPayload, computeClaimHash } from '../../../shared/proof/localStarkProver.mjs';
 
 const PROOF_CONTEXT = '13';
@@ -60,13 +61,42 @@ function buildCredentialBundleFile(entries: Record<string, number>, seed: string
   };
 }
 
+function buildMockHumanityBundleFile(mockHumanIds: string[], seed: string) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-request-mint-mock-humanity-'));
+  const bundlePath = path.join(tempDir, 'mock-humanity-bundle.json');
+  const bundle = buildMockHumanityBundle({
+    proofContext: PROOF_CONTEXT,
+    humans: mockHumanIds.map((mockHumanId) => ({
+      mockHumanId,
+      label: mockHumanId,
+    })),
+    seed,
+  });
+
+  fs.writeFileSync(bundlePath, JSON.stringify(bundle, null, 2));
+  return {
+    bundle,
+    bundlePath,
+    cleanup() {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    },
+  };
+}
+
 async function createApp(
   entries: Record<string, number>,
-  resolveSmartAccount: (recipient: string) => Promise<string> | string = resolveSmartAccountForRecipient
+  resolveSmartAccount: (recipient: string) => Promise<string> | string = resolveSmartAccountForRecipient,
+  options: {
+    humanityProvider?: 'local-credential' | 'mock-humanity';
+    mockHumanIds?: string[];
+  } = {}
 ) {
   const db = new PhilDatabase(':memory:');
   const app = Fastify();
-  const bundleFixture = buildCredentialBundleFile(entries, 'request-mint-route-test');
+  const humanityProvider = options.humanityProvider || 'local-credential';
+  const bundleFixture = humanityProvider === 'mock-humanity'
+    ? buildMockHumanityBundleFile(options.mockHumanIds || ['atlas', 'briar'], 'request-mint-route-mock')
+    : buildCredentialBundleFile(entries, 'request-mint-route-test');
 
   await app.register(authRoute, {
     db,
@@ -82,7 +112,12 @@ async function createApp(
     proofGateAddress: PROOF_GATE,
     eligibilityProvider: createEligibilityProvider({
       env: {
-        CREDENTIAL_BUNDLE_PATH: bundleFixture.bundlePath,
+        HUMANITY_PROVIDER: humanityProvider === 'mock-humanity' ? 'mock' : 'local-credential',
+        CHAIN_ID: String(CHAIN_ID),
+        NODE_ENV: 'development',
+        ...(humanityProvider === 'mock-humanity'
+          ? { MOCK_HUMANITY_BUNDLE_PATH: bundleFixture.bundlePath }
+          : { CREDENTIAL_BUNDLE_PATH: bundleFixture.bundlePath }),
       } as NodeJS.ProcessEnv,
       isNullifierSpent: async () => false,
       isProofReserved: async (proofMetadata) =>
@@ -325,8 +360,10 @@ describe('/request-mint local proving flow', () => {
         signature: proof.signature,
       });
       expect(body.provingRequest).toMatchObject({
-        schema: 'zkphil-local-proof-request-v2',
+        schema: 'zkphil-local-proof-request-v3',
         provingMode: 'scarb-stwo',
+        provider: 'local-credential-commitment',
+        providerMode: 'local-credential',
         kind: 'mint',
         claimKind: 1,
         recipient: wallet.address.toLowerCase(),
@@ -334,6 +371,9 @@ describe('/request-mint local proving flow', () => {
         expectedFactHash: proof.factHash,
         expectedProofMetadata: proof.signature,
         programHash: PROGRAM_HASH,
+        identitySource: {
+          kind: 'recipient',
+        },
       });
       expect(Number(expiry)).toBeGreaterThanOrEqual(before + MINT_TTL_SECONDS);
       expect(Number(expiry)).toBeLessThanOrEqual(after + MINT_TTL_SECONDS + 1);
@@ -368,6 +408,113 @@ describe('/request-mint local proving flow', () => {
       expect(eligibility.json()).toEqual({
         eligible: false,
         remaining: 0,
+        humanityProvider: 'local-credential',
+      });
+    } finally {
+      await closeApp(app, db, cleanupBundle);
+    }
+  });
+
+  it('returns mock-humanity proving inputs and reserves a mock human across wallets', async () => {
+    const walletA = ethers.Wallet.createRandom();
+    const walletB = ethers.Wallet.createRandom();
+    const { app, db, cleanupBundle } = await createApp(
+      {},
+      resolveSmartAccountForRecipient,
+      {
+        humanityProvider: 'mock-humanity',
+        mockHumanIds: ['atlas', 'briar'],
+      }
+    );
+
+    try {
+      const tokenA = await authenticate(app, walletA);
+      const first = await app.inject({
+        method: 'POST',
+        url: '/request-mint',
+        headers: {
+          authorization: `Bearer ${tokenA}`,
+        },
+        payload: {
+          recipient: walletA.address,
+          mockHumanId: 'atlas',
+          philId: 2,
+          paletteVariant: 5,
+        },
+      });
+
+      expect(first.statusCode).toBe(200);
+      expect(first.json()).toMatchObject({
+        success: true,
+        humanityProvider: 'mock-humanity',
+        mockHumanId: 'atlas',
+        provingRequest: {
+          schema: 'zkphil-local-proof-request-v3',
+          provider: 'mock-humanity',
+          providerMode: 'mock-humanity',
+          mockHumanId: 'atlas',
+          identitySource: {
+            kind: 'mock-human',
+            mockHumanId: 'atlas',
+          },
+        },
+      });
+
+      const tokenB = await authenticate(app, walletB);
+      const second = await app.inject({
+        method: 'POST',
+        url: '/request-mint',
+        headers: {
+          authorization: `Bearer ${tokenB}`,
+        },
+        payload: {
+          recipient: walletB.address,
+          mockHumanId: 'atlas',
+          philId: 3,
+          paletteVariant: 4,
+        },
+      });
+
+      expect(second.statusCode).toBe(403);
+      expect(second.json()).toMatchObject({
+        success: false,
+        code: 'MOCK_HUMAN_ALREADY_USED',
+      });
+    } finally {
+      await closeApp(app, db, cleanupBundle);
+    }
+  });
+
+  it('requires mockHumanId when mock-humanity mode is active', async () => {
+    const wallet = ethers.Wallet.createRandom();
+    const { app, db, cleanupBundle } = await createApp(
+      {},
+      resolveSmartAccountForRecipient,
+      {
+        humanityProvider: 'mock-humanity',
+        mockHumanIds: ['atlas'],
+      }
+    );
+
+    try {
+      const token = await authenticate(app, wallet);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/request-mint',
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
+        payload: {
+          recipient: wallet.address,
+          philId: 1,
+          paletteVariant: 1,
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({
+        success: false,
+        code: 'MOCK_HUMAN_ID_REQUIRED',
       });
     } finally {
       await closeApp(app, db, cleanupBundle);
@@ -451,6 +598,7 @@ describe('/request-mint local proving flow', () => {
       expect(afterFailure.json()).toEqual({
         eligible: true,
         remaining: 1,
+        humanityProvider: 'local-credential',
       });
 
       const second = await app.inject({

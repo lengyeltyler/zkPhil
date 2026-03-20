@@ -15,6 +15,11 @@ describe('/status', () => {
       factRegistryAddress: '0x3000000000000000000000000000000000000003',
       paymasterAddress: '0x4000000000000000000000000000000000000004',
       backendNetwork: 'local',
+      humanityProvider: 'mock-humanity',
+      humanityProviderLabel: 'DEV/TEST mock humanity',
+      humanityBridge: 'fact-registry',
+      humanityProviderDevOnly: true,
+      mockHumans: [{ mockHumanId: 'atlas', label: 'Atlas' }],
     });
 
     try {
@@ -32,6 +37,10 @@ describe('/status', () => {
         proofGateAddress: '0x2000000000000000000000000000000000000002',
         factRegistryAddress: '0x3000000000000000000000000000000000000003',
         paymasterAddress: '0x4000000000000000000000000000000000000004',
+        humanityProvider: 'mock-humanity',
+        humanityProviderLabel: 'DEV/TEST mock humanity',
+        humanityBridge: 'fact-registry',
+        humanityProviderDevOnly: true,
       });
     } finally {
       await app.close();

@@ -16,8 +16,10 @@
  *   PROGRAM_HASH              - Cairo program hash (bytes32 hex, 0x-prefixed)
  *   PROOF_CONTEXT             - proof context identifier (default: 13)
  *   FACT_REGISTRY             - Optional external fact registry (required off local chain)
+ *   HUMANITY_PROVIDER         - local-credential (default) or mock (DEV/TEST ONLY on 31337)
  *   VERIFIER_CONFIG_HASH      - Humanity verifier config hash (or set CREDENTIAL_BUNDLE_PATH)
  *   CREDENTIAL_BUNDLE_PATH    - Path to a generated credential bundle; deploy uses its verifier config hash
+ *   MOCK_HUMANITY_BUNDLE_PATH - Path to a generated mock-humanity bundle for HUMANITY_PROVIDER=mock
  *   PHIL_SVG_STORAGE          - Optional existing PhilSVGStorage address
  *   PHIL_LAYER_REGISTRY       - Optional existing PhilLayerRegistry address
  *   REUSE_STARK_DEPLOYMENTS   - Reuse deployments/stark_<chainId>.json instead of redeploying
@@ -96,8 +98,10 @@ export function readDeployStarkConfig(env = process.env) {
       '0x4444444444444444444444444444444444444444444444444444444444444444',
     proofContext: BigInt(env.PROOF_CONTEXT || env.CONTEXT_ID || '13'),
     factRegistryAddress: String(env.FACT_REGISTRY || '').trim(),
+    humanityProvider: String(env.HUMANITY_PROVIDER || 'local-credential').trim(),
     verifierConfigHash: String(env.VERIFIER_CONFIG_HASH || env.ELIGIBILITY_ROOT || '').trim(),
     credentialBundlePath: String(env.CREDENTIAL_BUNDLE_PATH || env.ELIGIBILITY_BUNDLE_PATH || '').trim(),
+    mockHumanityBundlePath: String(env.MOCK_HUMANITY_BUNDLE_PATH || env.HUMANITY_BUNDLE_PATH || '').trim(),
     dryRun,
     reuseStark:
       !isTruthy(env.FORCE_REDEPLOY) &&
@@ -109,7 +113,7 @@ export function readDeployStarkConfig(env = process.env) {
 }
 
 export async function runDeployStark(config = readDeployStarkConfig(process.env)) {
-  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+  const provider = new ethers.JsonRpcProvider(config.rpcUrl, undefined, { batchMaxCount: 1 });
   const network = await provider.getNetwork();
   const connectedChainId = Number(network.chainId);
   if (connectedChainId !== config.configuredChainId) {
@@ -148,6 +152,7 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
   console.log(`Chain ID:     ${connectedChainId}`);
   console.log(`Program Hash: ${config.programHash}`);
   console.log(`Proof Context: ${config.proofContext}`);
+  console.log(`Humanity Provider: ${config.humanityProvider}`);
   if (config.factRegistryAddress) {
     console.log(`Fact Registry: ${config.factRegistryAddress}`);
   }
@@ -156,6 +161,9 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
   }
   if (config.credentialBundlePath) {
     console.log(`Credential Bundle: ${config.credentialBundlePath}`);
+  }
+  if (config.mockHumanityBundlePath) {
+    console.log(`Mock Humanity Bundle: ${config.mockHumanityBundlePath}`);
   }
   console.log('Proof Mode:   Local Cairo + S-two proof facts');
   console.log('Fact Bridge:  DevProofVerifier (31337) / external FACT_REGISTRY (public chains)');
@@ -167,8 +175,10 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
     programHash: config.programHash,
     proofContext: config.proofContext,
     factRegistryAddress: config.factRegistryAddress,
+    humanityProvider: config.humanityProvider,
     verifierConfigHash: config.verifierConfigHash,
     credentialBundlePath: config.credentialBundlePath,
+    mockHumanityBundlePath: config.mockHumanityBundlePath,
     svgStorageAddress: config.svgStorageAddress,
     layerRegistryAddress: config.layerRegistryAddress,
     writeDeployments: !config.dryRun,
@@ -187,6 +197,9 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
     PhilNFT: deployments.PhilNFT,
     PhilWeb3: deployments.PhilWeb3,
     FactRegistryHumanityVerifier: deployments.FactRegistryHumanityVerifier,
+    MockHumanityVerifier: deployments.MockHumanityVerifier || '',
+    humanityVerifier: deployments.humanityVerifier,
+    humanityProvider: deployments.humanityProvider,
     programHash: config.programHash,
     proofContext: config.proofContext.toString(),
     factRegistry: deployments.factRegistry,

@@ -9,6 +9,14 @@ export interface StatusRouteConfig {
   factRegistryAddress: string;
   paymasterAddress: string;
   backendNetwork: string;
+  humanityProvider: string;
+  humanityProviderLabel: string;
+  humanityBridge: string;
+  humanityProviderDevOnly: boolean;
+  mockHumans?: Array<{
+    mockHumanId: string;
+    label: string;
+  }>;
 }
 
 interface StatusResponse {
@@ -21,6 +29,14 @@ interface StatusResponse {
   factRegistryAddress: string;
   paymasterAddress: string;
   backendNetwork: string;
+  humanityProvider: string;
+  humanityProviderLabel: string;
+  humanityBridge: string;
+  humanityProviderDevOnly: boolean;
+  mockHumans?: Array<{
+    mockHumanId: string;
+    label: string;
+  }>;
 }
 
 export default async function statusRoute(
@@ -36,6 +52,11 @@ export default async function statusRoute(
     factRegistryAddress,
     paymasterAddress,
     backendNetwork,
+    humanityProvider,
+    humanityProviderLabel,
+    humanityBridge,
+    humanityProviderDevOnly,
+    mockHumans,
   } = config;
 
   fastify.get('/status', async (): Promise<StatusResponse> => {
@@ -49,6 +70,11 @@ export default async function statusRoute(
       factRegistryAddress,
       paymasterAddress,
       backendNetwork,
+      humanityProvider,
+      humanityProviderLabel,
+      humanityBridge,
+      humanityProviderDevOnly,
+      mockHumans,
     };
   });
 

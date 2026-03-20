@@ -8,6 +8,7 @@ import {
   ACTION_MINT,
   buildProofPayload,
   prepareScarbInput,
+  HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
 } from '../../shared/proof/localStarkProver.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -43,16 +44,41 @@ function relOrAbsPath(filePath) {
   return path.isAbsolute(filePath) ? filePath : path.join(ROOT_DIR, filePath);
 }
 
+function resolveRequestSecret(input) {
+  const secret = input.humanitySecret ?? input.credentialSecret ?? input.secret;
+  if (secret == null) {
+    throw new Error('proving request is missing humanitySecret/credentialSecret');
+  }
+  return BigInt(secret);
+}
+
+function resolveRequestWitness(input) {
+  const witness = input.commitmentWitness ?? input.witness;
+  if (!witness) {
+    throw new Error('proving request is missing commitmentWitness');
+  }
+  return witness;
+}
+
+function resolveRequestProviderMode(input) {
+  return input.providerMode
+    ?? (input.provider === 'mock-humanity' ? 'mock-humanity' : HUMANITY_PROVIDER_LOCAL_CREDENTIAL);
+}
+
 function buildScarbArguments(input) {
+  const witness = resolveRequestWitness(input);
   return prepareScarbInput({
-    secret: BigInt(input.credentialSecret),
-    siblings: input.commitmentWitness.siblings.map((value) => BigInt(value)),
-    pathIndices: input.commitmentWitness.pathIndices.map((value) => Number(value)),
-    commitmentRoot: BigInt(input.commitmentWitness.commitmentRoot),
+    secret: resolveRequestSecret(input),
+    siblings: witness.siblings.map((value) => BigInt(value)),
+    pathIndices: witness.pathIndices.map((value) => Number(value)),
+    commitmentRoot: BigInt(witness.commitmentRoot),
     proofContext: BigInt(input.proofContext),
     recipient: BigInt(input.recipient),
     claimHash: input.claimHash,
     claimKind: Number(input.claimKind),
+    providerMode: resolveRequestProviderMode(input),
+    identitySubject: input.identitySource?.value,
+    mockHumanIdHash: input.mockHumanIdHash,
   }).map((value) => BigInt(value).toString()).join(',');
 }
 
@@ -139,8 +165,11 @@ export async function generateLocalProofArtifact(options) {
     claimHash: request.claimHash,
     claimKind: Number(request.claimKind),
     verifierConfigHash: BigInt(request.verifierConfigHash),
-    secret: BigInt(request.credentialSecret),
+    secret: resolveRequestSecret(request),
     expiry: BigInt(request.expiry),
+    providerMode: resolveRequestProviderMode(request),
+    identitySubject: request.identitySource?.value,
+    mockHumanIdHash: request.mockHumanIdHash,
   });
 
   const shouldProve = Boolean(options.prove);
@@ -186,8 +215,9 @@ export async function generateLocalProofArtifact(options) {
   }
 
   const artifact = {
-    schema: 'zkphil-stwo-proof-artifact-v2',
+    schema: 'zkphil-stwo-proof-artifact-v3',
     provider: request.provider,
+    providerMode: resolveRequestProviderMode(request),
     generatedAt: new Date().toISOString(),
     kind: request.kind === 'action' ? 'action' : 'mint',
     provingMode: 'scarb-stwo',

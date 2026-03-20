@@ -237,7 +237,7 @@ export function readDeploy4337Config(env = process.env) {
 }
 
 export async function runDeploy4337(config = readDeploy4337Config(process.env)) {
-  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+  const provider = new ethers.JsonRpcProvider(config.rpcUrl, undefined, { batchMaxCount: 1 });
   const rawWallet = new ethers.Wallet(
     config.privateKey ||
       '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',

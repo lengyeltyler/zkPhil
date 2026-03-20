@@ -296,13 +296,20 @@ async function main() {
     PROOF_GATE_ADDRESS,
     [
       'function authorizedCaller(address) view returns (bool)',
-      'function factRegistry() view returns (address)',
+      'function humanityVerifier() view returns (address)',
       'function isNullifierSpent(uint256 nullifier) view returns (bool)',
     ],
     provider
   );
-
-  const factRegistryAddress = ethers.getAddress(await proofGateReader.factRegistry());
+  const humanityVerifierAddress = ethers.getAddress(await proofGateReader.humanityVerifier());
+  const humanityVerifierReader = new ethers.Contract(
+    humanityVerifierAddress,
+    [
+      'function factRegistry() view returns (address)',
+    ],
+    provider
+  );
+  const factRegistryAddress = ethers.getAddress(await humanityVerifierReader.factRegistry());
 
   let eligibilityProvider: EligibilityProvider;
   try {
@@ -316,6 +323,7 @@ async function main() {
     console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
+  const humanityProviderInfo = eligibilityProvider.getInfo();
 
   if (PHIL_ACCOUNT_FACTORY) {
     const factoryCode = await provider.getCode(PHIL_ACCOUNT_FACTORY);
@@ -485,6 +493,11 @@ async function main() {
     factRegistryAddress,
     paymasterAddress: PAYMASTER_ADDRESS,
     backendNetwork,
+    humanityProvider: humanityProviderInfo.mode,
+    humanityProviderLabel: humanityProviderInfo.label,
+    humanityBridge: humanityProviderInfo.bridge,
+    humanityProviderDevOnly: humanityProviderInfo.devOnly,
+    mockHumans: humanityProviderInfo.mockHumans,
   });
 
   await fastify.register(authRoute, {
@@ -555,6 +568,10 @@ async function main() {
     console.log(`Backend Network: ${backendNetwork}`);
     console.log(`Program Hash: ${PROGRAM_HASH}`);
     console.log(`Fact Registry: ${factRegistryAddress}`);
+    console.log(`Humanity Provider: ${humanityProviderInfo.mode}`);
+    console.log(`Humanity Label: ${humanityProviderInfo.label}`);
+    console.log(`Humanity Bridge: ${humanityProviderInfo.bridge}`);
+    console.log(`Humanity Dev Only: ${humanityProviderInfo.devOnly}`);
     console.log(`CORS origins: ${allowedOrigins.size === 0 ? '(none)' : [...allowedOrigins].join(', ')}`);
     console.log(`Loopback origins allowed: ${allowLoopbackOrigins}`);
     console.log(`Mint TTL (s): ${MINT_TTL_SECONDS}`);
@@ -566,6 +583,9 @@ async function main() {
       console.log(`Paymaster: ${PAYMASTER_ADDRESS}`);
     }
     console.log(`ProofGate: ${PROOF_GATE_ADDRESS}`);
+    if (humanityProviderInfo.mockHumans?.length) {
+      console.log(`Mock Humans: ${humanityProviderInfo.mockHumans.map((entry) => entry.mockHumanId).join(', ')}`);
+    }
     console.log('='.repeat(60));
     console.log('\nEndpoints:');
     console.log('  GET  /health         - Health check');

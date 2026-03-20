@@ -152,8 +152,15 @@ export async function runVerifySepoliaBindings(
     const proofGate = new ethers.Contract(
       config.proofGateAddress,
       [
-        'function factRegistry() view returns (address)',
+        'function humanityVerifier() view returns (address)',
         'function authorizedCaller(address) view returns (bool)',
+      ],
+      provider
+    );
+    const humanityVerifier = new ethers.Contract(
+      ethers.getAddress(await proofGate.humanityVerifier()),
+      [
+        'function factRegistry() view returns (address)',
       ],
       provider
     );
@@ -175,7 +182,7 @@ export async function runVerifySepoliaBindings(
       provider
     );
 
-    const onchainFactRegistry = ethers.getAddress(await proofGate.factRegistry());
+    const onchainFactRegistry = ethers.getAddress(await humanityVerifier.factRegistry());
     const onchainFactoryProofGate = ethers.getAddress(await factory.proofGate());
     const onchainFactoryPhilIdentityMint = ethers.getAddress(await factory.philIdentityMint());
     const onchainUnlockInbox = ethers.getAddress(await factory.unlockInbox());
@@ -197,7 +204,7 @@ export async function runVerifySepoliaBindings(
     const onchainL2Verifier = BigInt(await unlockInbox.l2VerifierAddress());
 
     assertAddressMatch(
-      'ProofGate.factRegistry()',
+      'HumanityVerifier.factRegistry()',
       config.factRegistryAddress,
       onchainFactRegistry
     );
@@ -241,7 +248,7 @@ export async function runVerifySepoliaBindings(
     }
 
     console.log(`Verified Sepolia deployment bindings on chain ${connectedChainId}:`);
-    console.log(`  ProofGate.factRegistry(): ${onchainFactRegistry}`);
+    console.log(`  HumanityVerifier.factRegistry(): ${onchainFactRegistry}`);
     console.log(`  ProofGate.authorizedCaller(PHIL_IDENTITY_MINT): true`);
     console.log(`  ProofGate.authorizedCaller(PHIL_ACCOUNT_FACTORY): true`);
     console.log(`  PHIL_ACCOUNT_FACTORY.proofGate(): ${onchainFactoryProofGate}`);

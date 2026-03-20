@@ -2,55 +2,88 @@
 
 ## Overview
 
-zkPhil now models Phil minting as human-gated identity issuance.
+zkPhil now has a provider-aware humanity architecture with a shared gate:
 
-- `PhilIdentityGate` handles caller authorization, claim binding, and one-nullifier-one-identity enforcement.
-- `IHumanityVerifier` is the provider-agnostic proof verifier interface.
-- `FactRegistryHumanityVerifier` is the current implementation.
+- `PhilIdentityGate` handles caller authorization, claim binding, nullifier spend tracking, and replay protection.
+- `IHumanityVerifier` is the provider-agnostic verifier interface.
+- the active bridge remains fact-registry-based.
 - Cairo + S-two remain the proving layer.
-- Ethereum remains the settlement and identity layer.
-- the backend is not an authorization root
+- the backend is a request-preparation helper, not the authorization root.
+
+## Provider modes
+
+### `HUMANITY_PROVIDER=local-credential`
+
+Production-oriented bridge mode for the existing local credential-commitment flow.
+
+- verifier contract: `FactRegistryHumanityVerifier`
+- proof request provider: `local-credential-commitment`
+- identity subject: recipient wallet
+- commitment witness: recipient-bound credential commitment
+
+### `HUMANITY_PROVIDER=mock`
+
+DEV/TEST-ONLY mock-humanity mode.
+
+- verifier contract: `MockHumanityVerifier`
+- proof request provider: `mock-humanity`
+- identity subject: deterministic `mockHumanIdHash`
+- claim hash still binds the recipient and `mintTo`
+- one mock human should consume one Phil identity nullifier
+
+This is not World ID.
+This does not call any external proof-of-human service.
 
 ## Main components
 
 - [`contracts/PhilIdentityGate.sol`](../contracts/PhilIdentityGate.sol)
 - [`contracts/IHumanityVerifier.sol`](../contracts/IHumanityVerifier.sol)
 - [`contracts/proofs/FactRegistryHumanityVerifier.sol`](../contracts/proofs/FactRegistryHumanityVerifier.sol)
+- [`contracts/proofs/MockHumanityVerifier.sol`](../contracts/proofs/MockHumanityVerifier.sol)
 - [`contracts/proofs/DevProofVerifier.sol`](../contracts/proofs/DevProofVerifier.sol)
 - [`cairo/src/credential.cairo`](../cairo/src/credential.cairo)
 - [`shared/proof/localStarkProver.mjs`](../shared/proof/localStarkProver.mjs)
 - [`shared/proof/credentialBundle.mjs`](../shared/proof/credentialBundle.mjs)
+- [`shared/proof/mockHumanityBundle.mjs`](../shared/proof/mockHumanityBundle.mjs)
+- [`server-ts/src/lib/eligibility.ts`](../server-ts/src/lib/eligibility.ts)
 - [`server-ts/src/routes/requestMint.ts`](../server-ts/src/routes/requestMint.ts)
 - [`server-ts/src/routes/registerProof.ts`](../server-ts/src/routes/registerProof.ts)
 - [`frontend/mint.js`](../frontend/mint.js)
 
-## Current local provider
+## Proof request model
 
-The repo ships one concrete local provider today:
+The backend returns `zkphil-local-proof-request-v3`.
 
-- a recipient-bound credential secret
-- a Cairo proof that derives a `credentialCommitment`
-- a `verifierConfigHash` that is currently a Merkle commitment root
-- an `identityNullifier` derived from secret + proof context + recipient + claim kind
+Shared fields:
 
-This is intentionally an implementation bridge, not the long-term product abstraction.
+- `provider`
+- `providerMode`
+- `claimHash`
+- `verifierConfigHash`
+- `commitmentWitness`
+- `expectedFactHash`
+- `expectedProofMetadata`
+- `expectedIdentityNullifier`
+- `expectedCredentialCommitment`
+- `programHash`
+- `proofContext`
 
-## Identity issuance flow
+Local-credential mode adds:
 
-1. The client authenticates with the backend.
-2. `request-mint` selects an unused local credential witness from `CREDENTIAL_BUNDLE_PATH`.
-3. The backend returns:
-   - the contract proof payload `{ expiry, factHash, signature }`
-   - a `provingRequest` artifact for local Cairo execution
-4. The client sends `provingRequest` to the localhost prover.
-5. Cairo runs locally and emits `zkphil-stwo-proof-artifact-v2`.
-6. The client submits the resulting proof payload to `/register-proof`.
-7. `FactRegistryHumanityVerifier` checks the fact hash against the registry.
-8. `PhilIdentityGate` consumes the returned identity nullifier.
+- `credentialSecret`
+- `identitySource.kind = recipient`
 
-## Public outputs
+Mock-humanity mode adds:
 
-The current Cairo provider emits:
+- `humanitySecret`
+- `mockHumanId`
+- `mockHumanIdHash`
+- `identitySource.kind = mock-human`
+- `expectedHumanityCommitment`
+
+## Cairo public outputs
+
+The current Cairo provider still emits eight public outputs:
 
 1. `verifier_config_hash`
 2. `proof_context`
@@ -61,53 +94,38 @@ The current Cairo provider emits:
 7. `credential_commitment`
 8. `claim_kind`
 
-`MintProof.signature` now carries:
+In mock-humanity mode, output slot `7` carries the mock-humanity commitment.
+The output shape stays stable so the fact-registry bridge does not change.
 
-```text
-abi.encode(uint256 identityNullifier, uint256 credentialCommitment)
-```
+## End-to-end local mock-humanity flow
+
+1. The user authenticates with the backend.
+2. The frontend exposes available mock humans from backend status / eligibility.
+3. `request-mint` or account-create action request returns a provider-aware proving request.
+4. The local prover executes the Cairo program and emits `zkphil-stwo-proof-artifact-v3`.
+5. `/register-proof` registers the resulting fact in the local `DevProofVerifier`.
+6. `MockHumanityVerifier` checks the registered fact.
+7. `PhilIdentityGate` consumes the identity nullifier.
+8. `PhilIdentityMint` mints to the requested smart account.
 
 ## Trust model
 
 Removed:
 
 - backend mint-signing authority
-- `ALLOWLIST_SIGNER_KEY`
-- allowlist slot consumption as the conceptual authorization model
+- allowlist slot language as the product authorization model
+- any claim that mock-humanity mode is production verification
 
 Retained:
 
 - backend auth/session handling
 - deterministic `mintTo` binding
+- fact-registry bridge verification
 - onchain nullifier consumption
-- local/dev fact registration on `31337`
 
-## Future humanity providers
+## Current limitations
 
-The insertion point for future providers is `IHumanityVerifier`.
-
-Future implementations can support:
-
-- World / World ID style proof-of-human systems
-- other proof-of-personhood systems
-- migration credentials for early users
-- internal development providers
-
-Those providers are intentionally not implemented in this repo yet.
-
-## Verification path
-
-Production/public chains:
-
-- use an external fact registry
-- rely on the local prover plus the registry bridge, not on any backend signer
-
-Local dev (`31337`):
-
-- use `DevProofVerifier`
-- use `POST /register-proof` with `FACT_REGISTRY_OPERATOR_KEY`
-
-## Current limitation
-
-- This repo still does not perform direct onchain Ethereum verification of S-two proofs.
-- The active production path is fact-registry-based verification.
+- Direct Ethereum-side verification of S-two proofs is still not implemented.
+- The active bridge is still fact-registry-based.
+- World / World ID remains intentionally unimplemented.
+- `HUMANITY_PROVIDER=mock` is restricted to local development and testing.

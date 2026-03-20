@@ -1,27 +1,42 @@
 # HUMANITY_READY_SUMMARY
 
-## Removed tree/slot leftovers
+## What is now in place
 
-- proof metadata no longer carries `credentialSlot` or `credentialLeaf`
-- Cairo public outputs now emit `credentialCommitment` and `identityNullifier`
-- the active verifier surface no longer exposes `eligibilityRoot`; it exposes `verifierConfigHash`
-- the bundle/proving scripts now talk about credential commitments and commitment witnesses
+- `PhilIdentityGate` remains the shared identity/nullifier gate.
+- `IHumanityVerifier` remains the provider abstraction.
+- the current bridge remains fact-registry-based.
+- local Cairo + S-two proving remains the core proving path.
 
-## New abstractions
+## New dev/test capability
 
-- [`contracts/IHumanityVerifier.sol`](./contracts/IHumanityVerifier.sol)
-- [`contracts/proofs/FactRegistryHumanityVerifier.sol`](./contracts/proofs/FactRegistryHumanityVerifier.sol)
+The repo now has a clearly isolated mock-humanity testing mode:
 
-`PhilIdentityGate` now depends only on the humanity verifier abstraction plus its own nullifier/replay protection logic.
+- verifier contract: [`contracts/proofs/MockHumanityVerifier.sol`](./contracts/proofs/MockHumanityVerifier.sol)
+- bundle builder: [`shared/proof/mockHumanityBundle.mjs`](./shared/proof/mockHumanityBundle.mjs)
+- bundle script: [`scripts/proofs/build_mock_humanity_bundle.mjs`](./scripts/proofs/build_mock_humanity_bundle.mjs)
+- committed sample humans: [`fixtures/mock_humans.dev.json`](./fixtures/mock_humans.dev.json)
 
-## How the repo is ready for World-style verification later
+This mode is DEV/TEST ONLY.
+It is not World ID.
 
-- future providers can replace `FactRegistryHumanityVerifier` without rewriting `PhilIdentityGate`
-- the proof context, nullifier model, and recipient binding are already separated from the current credential-root implementation
-- the current local provider is explicit about being a bridge, not the long-term human-verification product model
+## What mock-humanity mode simulates
 
-## Intentionally unimplemented
+- `mockHumanId`
+- `humanitySecret`
+- deterministic `identityNullifier`
+- recipient-bound claim hashes
+- one-human-one-identity nullifier semantics
+
+## What stayed stable
+
+- the Cairo public output shape
+- fact-hash computation shape
+- `MintProof.signature = abi.encode(identityNullifier, credentialCommitment)`
+- backend non-authoritative role
+- smart-account mint binding semantics
+
+## Intentionally still unimplemented
 
 - World / World ID integration
 - any external proof-of-human API calls
-- direct Ethereum onchain verification of S-two proof artifacts
+- direct onchain Ethereum verification of S-two proof artifacts

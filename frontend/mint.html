@@ -16,12 +16,12 @@
     <header id="heroSection" class="mast">
       <div class="mast-inner">
         <div class="eyebrow">Phil Identity</div>
-        <h1>Mint Your Phil</h1>
-        <p class="lede">
-          Connect your wallet, scroll through deterministic previews, lock one Phil, and mint with STARK eligibility proof.
+        <h1>Mint a Phil Identity</h1>
+        <p id="heroLede" class="lede">
+          Connect your wallet, choose a dev humanity mode, generate a local Cairo + S-two proof, and mint to your Smart Account.
         </p>
-        <p class="how-it-works">
-          Connect → scroll to lock a selection → mint to your Smart Account on local Hardhat.
+        <p id="heroHowItWorks" class="how-it-works">
+          DEV/TEST ONLY. Mock humanity mode simulates future proof-of-human verification. It is not World ID and not production security.
         </p>
 
         <div class="hero-actions">
@@ -61,7 +61,8 @@
         <span id="walletPill" class="pill">EOA -</span>
         <span id="smartAccountPill" class="pill">Smart -</span>
         <span id="networkPill" class="pill">Local</span>
-        <span id="testModePill" class="pill test-mode-pill hidden">TEST MODE (no STARK proofs)</span>
+        <span id="testModePill" class="pill test-mode-pill hidden">DEV LOCAL MODE</span>
+        <span id="humanityProviderPill" class="pill">Humanity -</span>
         <span id="supplyCount" class="pill supply-pill">0 / 13 minted</span>
       </section>
 
@@ -77,6 +78,19 @@
         <div class="selection-card">
           <h2 class="selector-title">Selection</h2>
           <div id="selectionStatus" class="selection-status">Scroll to generate. Click a Phil to select it.</div>
+          <div class="humanity-mode-card">
+            <div class="security-row">
+              <span class="security-label">Humanity Mode</span>
+              <span id="humanityModeStatus" class="security-value">Checking backend...</span>
+            </div>
+            <div id="mockHumanControls" class="mock-human-controls hidden">
+              <label class="mock-human-label" for="mockHumanSelect">Simulated Human</label>
+              <select id="mockHumanSelect" class="mock-human-select"></select>
+              <div id="mockHumanHelp" class="mock-human-help">
+                Choose a DEV/TEST mock human. The same mock human should not be able to mint twice.
+              </div>
+            </div>
+          </div>
           <div id="selectedTraits" class="selected-traits"></div>
         </div>
       </section>

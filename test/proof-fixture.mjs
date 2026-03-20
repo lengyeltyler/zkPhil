@@ -1,9 +1,11 @@
 import { ethers } from 'ethers';
 
 import { buildCredentialBundle, getRecipientCredentials } from '../shared/proof/credentialBundle.mjs';
+import { buildMockHumanityBundle, getMockHuman } from '../shared/proof/mockHumanityBundle.mjs';
 import {
   generateLocalActionProof,
   generateLocalMintProof,
+  HUMANITY_PROVIDER_MOCK,
 } from '../shared/proof/localStarkProver.mjs';
 
 export function createEligibilityContext(addresses, { proofContext, contextId, credentialsPerAddress, seed } = {}) {
@@ -37,6 +39,63 @@ export function createEligibilityContext(addresses, { proofContext, contextId, c
         verifierConfigHash: bundle.verifierConfigHash,
         credentialSecret: entry.secret,
         credentialCommitment: entry.credentialCommitment,
+        commitmentWitness: {
+          commitmentRoot: bundle.verifierConfigHash,
+          siblings: entry.siblings,
+          pathIndices: entry.pathIndices,
+        },
+      };
+    },
+  };
+}
+
+export function createMockHumanityContext(mockHumans, { proofContext, contextId, seed } = {}) {
+  const resolvedProofContext = proofContext ?? contextId;
+  if (resolvedProofContext == null) {
+    throw new Error('proofContext is required for mock humanity fixtures');
+  }
+
+  const humans = mockHumans.map((entry, index) => {
+    if (typeof entry === 'string') {
+      return {
+        mockHumanId: entry,
+        label: entry,
+      };
+    }
+
+    return {
+      mockHumanId: entry.mockHumanId || entry.id || `mock-human-${index}`,
+      label: entry.label || entry.mockHumanId || entry.id || `Mock Human ${index + 1}`,
+      secret: entry.secret,
+    };
+  });
+
+  const bundle = buildMockHumanityBundle({
+    proofContext: resolvedProofContext,
+    humans,
+    seed,
+  });
+
+  return {
+    bundle,
+    humanFor(mockHumanId) {
+      const entry = getMockHuman(bundle, mockHumanId);
+      if (!entry) {
+        throw new Error(`missing mock human fixture for ${mockHumanId}`);
+      }
+      return {
+        verifierConfigHash: bundle.verifierConfigHash,
+        humanitySecret: entry.humanitySecret,
+        credentialCommitment: entry.humanityCommitment,
+        providerMode: HUMANITY_PROVIDER_MOCK,
+        mockHumanId: entry.mockHumanId,
+        mockHumanIdHash: entry.mockHumanIdHash,
+        identitySource: {
+          kind: 'mock-human',
+          value: entry.mockHumanIdHash,
+          label: entry.label,
+          mockHumanId: entry.mockHumanId,
+        },
         commitmentWitness: {
           commitmentRoot: bundle.verifierConfigHash,
           siblings: entry.siblings,
@@ -119,7 +178,10 @@ export async function buildMintProof({
     mixSeed,
     expiry,
     verifierConfigHash: credential.verifierConfigHash,
-    secret: credential.credentialSecret,
+    secret: credential.humanitySecret ?? credential.credentialSecret,
+    providerMode: credential.providerMode,
+    identitySubject: credential.identitySource?.value,
+    mockHumanIdHash: credential.mockHumanIdHash,
   });
 }
 
@@ -145,7 +207,10 @@ export async function buildActionProof({
     actionHash,
     expiry,
     verifierConfigHash: credential.verifierConfigHash,
-    secret: credential.credentialSecret,
+    secret: credential.humanitySecret ?? credential.credentialSecret,
+    providerMode: credential.providerMode,
+    identitySubject: credential.identitySource?.value,
+    mockHumanIdHash: credential.mockHumanIdHash,
   });
 }
 

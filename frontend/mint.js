@@ -568,6 +568,12 @@ const state = {
   hasCorrectNetwork: false,
   backendCompatible: false,
   backendStatus: null,
+  humanityProvider: null,
+  humanityProviderLabel: "",
+  humanityProviderDevOnly: false,
+  humanityBridge: "",
+  mockHumans: [],
+  selectedMockHumanId: "",
   backendAuthRecipient: null,
   backendAuthToken: null,
   backendAuthExpiresAt: 0,
@@ -589,6 +595,7 @@ const walletPill = document.getElementById("walletPill");
 const smartAccountPill = document.getElementById("smartAccountPill");
 const networkPill = document.getElementById("networkPill");
 const testModePill = document.getElementById("testModePill");
+const humanityProviderPill = document.getElementById("humanityProviderPill");
 const switchNetworkBtn = document.getElementById("switchNetworkBtn");
 const installWalletLink = document.getElementById("installWalletLink");
 const errorBanner = document.getElementById("errorBanner");
@@ -619,6 +626,10 @@ const unlockPayload = document.getElementById("unlockPayload");
 const ticketStatus = document.getElementById("ticketStatus");
 const flowStepper = document.getElementById("flowStepper");
 const configBanner = document.getElementById("configBanner");
+const humanityModeStatus = document.getElementById("humanityModeStatus");
+const mockHumanControls = document.getElementById("mockHumanControls");
+const mockHumanSelect = document.getElementById("mockHumanSelect");
+const mockHumanHelp = document.getElementById("mockHumanHelp");
 
 if (supplyCount) supplyCount.textContent = "0 / 13 minted";
 
@@ -639,6 +650,74 @@ function getReadProvider() {
 
 function modeLabel() {
   return `net=${ACTIVE_NETWORK.key}`;
+}
+
+function isMockHumanityMode() {
+  return state.humanityProvider === "mock-humanity";
+}
+
+function getSelectedMockHuman() {
+  if (!Array.isArray(state.mockHumans) || !state.selectedMockHumanId) return null;
+  return state.mockHumans.find((entry) => entry.mockHumanId === state.selectedMockHumanId) || null;
+}
+
+function syncMockHumanSelection() {
+  if (!isMockHumanityMode()) {
+    state.selectedMockHumanId = "";
+    if (mockHumanSelect) mockHumanSelect.innerHTML = "";
+    return;
+  }
+
+  const humans = Array.isArray(state.mockHumans) ? state.mockHumans : [];
+  if (!humans.length) {
+    state.selectedMockHumanId = "";
+    if (mockHumanSelect) {
+      mockHumanSelect.innerHTML = '<option value="">No mock humans available</option>';
+      mockHumanSelect.value = "";
+    }
+    return;
+  }
+
+  const selectedStillExists = humans.some((entry) => entry.mockHumanId === state.selectedMockHumanId);
+  if (!selectedStillExists) {
+    const firstAvailable = humans.find((entry) => entry.available !== false);
+    state.selectedMockHumanId = (firstAvailable || humans[0]).mockHumanId;
+  }
+
+  if (mockHumanSelect) {
+    mockHumanSelect.innerHTML = humans.map((entry) => {
+      const availability = entry.available === false ? " (used)" : "";
+      return `<option value="${entry.mockHumanId}">${entry.label}${availability}</option>`;
+    }).join("");
+    mockHumanSelect.value = state.selectedMockHumanId;
+  }
+}
+
+function updateHumanityUi() {
+  const modeLabelText = state.humanityProviderLabel || state.humanityProvider || "Unknown";
+  if (humanityProviderPill) {
+    humanityProviderPill.textContent = `Humanity ${modeLabelText}`;
+  }
+  if (humanityModeStatus) {
+    const bridge = state.humanityBridge ? ` via ${state.humanityBridge}` : "";
+    const devOnly = state.humanityProviderDevOnly ? " DEV/TEST ONLY" : "";
+    humanityModeStatus.textContent = `${modeLabelText}${bridge}${devOnly}`;
+  }
+  if (mockHumanControls) {
+    mockHumanControls.classList.toggle("hidden", !isMockHumanityMode());
+  }
+  syncMockHumanSelection();
+  if (mockHumanHelp) {
+    const selected = getSelectedMockHuman();
+    if (!isMockHumanityMode()) {
+      mockHumanHelp.textContent = "";
+    } else if (selected && selected.available === false) {
+      mockHumanHelp.textContent = `${selected.label} is already consumed or reserved. Choose a different mock human.`;
+    } else {
+      mockHumanHelp.textContent =
+        "Choose a DEV/TEST mock human. The same mock human should not be able to mint twice.";
+    }
+  }
 }
 
 function buildBackendMismatchMessage(status) {
@@ -663,6 +742,7 @@ function updateConfigBanner() {
     : "unreachable";
   const lines = [
     `mode: ${modeLabel()}`,
+    `humanity: ${state.humanityProvider || "unknown"}`,
     `targetChain: ${ACTIVE_NETWORK.chainId}`,
     `rpc: ${ACTIVE_NETWORK.rpcUrl}`,
     `deployments: ${LOADED_STARK_DEPLOYMENT || DEPLOYMENTS_STARK_FILE}, ${LOADED_4337_DEPLOYMENT || DEPLOYMENTS_4337_FILE}`,
@@ -689,6 +769,12 @@ async function fetchBackendStatus({ force = false } = {}) {
   if (!response.ok || !payload?.status) {
     state.backendStatus = null;
     state.backendCompatible = false;
+    state.humanityProvider = null;
+    state.humanityProviderLabel = "";
+    state.humanityProviderDevOnly = false;
+    state.humanityBridge = "";
+    state.mockHumans = [];
+    updateHumanityUi();
     updateConfigBanner();
     return null;
   }
@@ -704,6 +790,12 @@ async function fetchBackendStatus({ force = false } = {}) {
 
   state.backendStatus = payload;
   state.backendCompatible = compatibility.ok && backendChainId === ACTIVE_NETWORK.chainId;
+  state.humanityProvider = payload.humanityProvider || null;
+  state.humanityProviderLabel = payload.humanityProviderLabel || payload.humanityProvider || "";
+  state.humanityProviderDevOnly = Boolean(payload.humanityProviderDevOnly);
+  state.humanityBridge = payload.humanityBridge || "";
+  state.mockHumans = Array.isArray(payload.mockHumans) ? payload.mockHumans : [];
+  updateHumanityUi();
   updateConfigBanner();
   return payload;
 }
@@ -796,6 +888,13 @@ function clearError() {
 function getEligibilityMessage() {
   if (!state.address || !state.hasCorrectNetwork) return "";
   if (!state.eligibilityChecked) return "Checking identity eligibility...";
+  if (isMockHumanityMode()) {
+    if (!state.selectedMockHumanId) return "Choose a DEV/TEST mock human to continue.";
+    const selected = getSelectedMockHuman();
+    if (selected && selected.available === false) {
+      return `${selected.label} has already been used. Choose a different mock human.`;
+    }
+  }
   if (state.eligibilityEligible) return "";
   return "This wallet is not currently eligible to create a Phil identity";
 }
@@ -805,6 +904,8 @@ async function refreshEligibility({ suppressErrors = false } = {}) {
     state.eligibilityChecked = false;
     state.eligibilityEligible = false;
     state.eligibilityRemaining = 0;
+    state.mockHumans = state.backendStatus?.mockHumans || [];
+    syncMockHumanSelection();
     updateSelectionMeta();
     updateUiState();
     return;
@@ -823,6 +924,10 @@ async function refreshEligibility({ suppressErrors = false } = {}) {
     state.eligibilityChecked = true;
     state.eligibilityEligible = Boolean(payload.eligible);
     state.eligibilityRemaining = Number(payload.remaining || 0);
+    if (Array.isArray(payload.mockHumans)) {
+      state.mockHumans = payload.mockHumans;
+    }
+    syncMockHumanSelection();
   } catch (err) {
     state.eligibilityChecked = false;
     state.eligibilityEligible = false;
@@ -864,6 +969,7 @@ function getViewState() {
     state.hasCorrectNetwork &&
     state.eligibilityChecked &&
     state.eligibilityEligible &&
+    (!isMockHumanityMode() || Boolean(state.selectedMockHumanId)) &&
     state.mintReady &&
     state.selectedIndex != null
   ) {
@@ -887,6 +993,7 @@ function updateWalletPills() {
   if (testModePill) {
     testModePill.classList.toggle("hidden", !TEST_MODE_ENABLED);
   }
+  updateHumanityUi();
 }
 
 function updateUiState() {
@@ -1057,6 +1164,7 @@ function clearWalletState() {
   state.eligibilityChecked = false;
   state.eligibilityEligible = false;
   state.eligibilityRemaining = 0;
+  state.selectedMockHumanId = "";
   state.mintReady = false;
   state.selectionLocked = false;
   state.lockedIndex = null;
@@ -1065,6 +1173,7 @@ function clearWalletState() {
   if (smartAccountStatus) smartAccountStatus.textContent = "Not ready";
   if (ownerCountEl) ownerCountEl.textContent = "-";
   if (unlockInboxStatus) unlockInboxStatus.textContent = "-";
+  updateHumanityUi();
 }
 
 function getDeterministicTestStarkKeyPair(ethers, eoa) {
@@ -1887,11 +1996,16 @@ function updatePreview() {
 }
 
 function updateMintButton() {
+  const selectedMockHuman = getSelectedMockHuman();
   const canMint =
     state.address &&
     state.hasCorrectNetwork &&
     state.eligibilityChecked &&
     state.eligibilityEligible &&
+    (!isMockHumanityMode() || (
+      Boolean(state.selectedMockHumanId) &&
+      (!selectedMockHuman || selectedMockHuman.available !== false)
+    )) &&
     (!state.use4337 || state.backendCompatible) &&
     state.mintReady &&
     state.selectedIndex != null &&
@@ -1923,6 +2037,10 @@ async function requestProof(options = {}) {
 
   const kind = options.kind === "action" ? "action" : "mint";
   const opts = options;
+  const mockHumanId = isMockHumanityMode() ? state.selectedMockHumanId : "";
+  if (isMockHumanityMode() && !mockHumanId) {
+    throw new Error("Choose a DEV/TEST mock human before requesting a proof.");
+  }
   if (!PROOF_GATE_ADDRESS) {
     throw new Error("ProofGate address is missing from deployments.");
   }
@@ -1942,6 +2060,7 @@ async function requestProof(options = {}) {
       recipient: state.address,
       actionType: Number(opts.actionType),
       actionHash: opts.actionHash,
+      ...(mockHumanId ? { mockHumanId } : {}),
       ...(opts.expiry != null ? { expiry: opts.expiry } : {}),
     };
   } else {
@@ -1958,6 +2077,7 @@ async function requestProof(options = {}) {
       paletteVariant,
       mixMode,
       mixSeed,
+      ...(mockHumanId ? { mockHumanId } : {}),
     };
   }
 
@@ -2404,6 +2524,14 @@ async function init() {
     usePaymasterToggle.checked = state.usePaymaster;
     usePaymasterToggle.addEventListener("change", () => {
       state.usePaymaster = Boolean(usePaymasterToggle.checked);
+    });
+  }
+  if (mockHumanSelect) {
+    mockHumanSelect.addEventListener("change", () => {
+      state.selectedMockHumanId = mockHumanSelect.value || "";
+      updateHumanityUi();
+      updateSelectionMeta();
+      updateMintButton();
     });
   }
 

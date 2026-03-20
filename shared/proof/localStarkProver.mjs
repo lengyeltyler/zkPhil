@@ -5,8 +5,17 @@ export const ACTION_MINT = 1;
 export const ACTION_ACCOUNT_CREATE = 2;
 export const ACTION_CADENCE_MINT = 4;
 export const ACTION_CADENCE_RESERVE = 5;
-export const DOMAIN_COMMITMENT = 1n;
-export const DOMAIN_NULLIFIER = 2n;
+export const HUMANITY_PROVIDER_LOCAL_CREDENTIAL = 'local-credential';
+export const HUMANITY_PROVIDER_LOCAL_CREDENTIAL_COMMITMENT = 'local-credential-commitment';
+export const HUMANITY_PROVIDER_MOCK = 'mock-humanity';
+export const HUMANITY_PROVIDER_MODE_CODE_LOCAL_CREDENTIAL = 1n;
+export const HUMANITY_PROVIDER_MODE_CODE_MOCK = 2n;
+export const DOMAIN_LOCAL_COMMITMENT = 1n;
+export const DOMAIN_LOCAL_NULLIFIER = 2n;
+export const DOMAIN_MOCK_COMMITMENT = 3n;
+export const DOMAIN_MOCK_NULLIFIER = 4n;
+export const DOMAIN_COMMITMENT = DOMAIN_LOCAL_COMMITMENT;
+export const DOMAIN_NULLIFIER = DOMAIN_LOCAL_NULLIFIER;
 
 function pedersen(a, b) {
   return BigInt(hash.computePedersenHash(a.toString(), b.toString()));
@@ -30,6 +39,84 @@ function resolveVerifierConfigHash(params) {
     return params.eligibilityRoot;
   }
   throw new Error('verifierConfigHash is required');
+}
+
+function normalizeHumanityProviderMode(providerMode) {
+  const normalized = String(providerMode || HUMANITY_PROVIDER_LOCAL_CREDENTIAL).trim().toLowerCase();
+  if (
+    normalized === HUMANITY_PROVIDER_LOCAL_CREDENTIAL ||
+    normalized === HUMANITY_PROVIDER_LOCAL_CREDENTIAL_COMMITMENT ||
+    normalized === 'credential' ||
+    normalized === 'local'
+  ) {
+    return HUMANITY_PROVIDER_LOCAL_CREDENTIAL;
+  }
+  if (normalized === HUMANITY_PROVIDER_MOCK || normalized === 'mock') {
+    return HUMANITY_PROVIDER_MOCK;
+  }
+  throw new Error(`Unsupported humanity provider mode: ${providerMode}`);
+}
+
+function normalizeSubjectValue(value) {
+  if (typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value.trim())) {
+    return BigInt(ethers.getAddress(value));
+  }
+  return BigInt(value);
+}
+
+export function resolveHumanityProviderModeCode(providerMode) {
+  if (typeof providerMode === 'bigint') {
+    if (
+      providerMode === HUMANITY_PROVIDER_MODE_CODE_LOCAL_CREDENTIAL ||
+      providerMode === HUMANITY_PROVIDER_MODE_CODE_MOCK
+    ) {
+      return providerMode;
+    }
+    throw new Error(`Unsupported humanity provider mode code: ${providerMode}`);
+  }
+
+  const normalized = normalizeHumanityProviderMode(providerMode);
+  return normalized === HUMANITY_PROVIDER_MOCK
+    ? HUMANITY_PROVIDER_MODE_CODE_MOCK
+    : HUMANITY_PROVIDER_MODE_CODE_LOCAL_CREDENTIAL;
+}
+
+function resolveCommitmentDomain(providerModeCode) {
+  if (providerModeCode === HUMANITY_PROVIDER_MODE_CODE_LOCAL_CREDENTIAL) {
+    return DOMAIN_LOCAL_COMMITMENT;
+  }
+  if (providerModeCode === HUMANITY_PROVIDER_MODE_CODE_MOCK) {
+    return DOMAIN_MOCK_COMMITMENT;
+  }
+  throw new Error(`Unsupported humanity provider mode code: ${providerModeCode}`);
+}
+
+function resolveNullifierDomain(providerModeCode) {
+  if (providerModeCode === HUMANITY_PROVIDER_MODE_CODE_LOCAL_CREDENTIAL) {
+    return DOMAIN_LOCAL_NULLIFIER;
+  }
+  if (providerModeCode === HUMANITY_PROVIDER_MODE_CODE_MOCK) {
+    return DOMAIN_MOCK_NULLIFIER;
+  }
+  throw new Error(`Unsupported humanity provider mode code: ${providerModeCode}`);
+}
+
+export function resolveIdentitySubject({
+  providerMode,
+  recipient,
+  subject,
+  identitySubject,
+  mockHumanIdHash,
+}) {
+  const providerModeCode = resolveHumanityProviderModeCode(providerMode);
+  const explicitSubject = identitySubject ?? subject ?? mockHumanIdHash;
+  if (explicitSubject != null) {
+    return normalizeSubjectValue(explicitSubject);
+  }
+  if (providerModeCode === HUMANITY_PROVIDER_MODE_CODE_LOCAL_CREDENTIAL) {
+    return normalizeSubjectValue(recipient);
+  }
+  throw new Error('identitySubject or mockHumanIdHash is required for mock-humanity mode');
 }
 
 function resolveProofDomain({ chainId, proofGateAddress, proofGate }) {
@@ -127,10 +214,20 @@ export function splitClaimHash(claimHash) {
 export function computeCredentialCommitment({
   secret,
   recipient,
+  subject,
+  identitySubject,
+  providerMode = HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
 }) {
+  const providerModeCode = resolveHumanityProviderModeCode(providerMode);
+  const resolvedSubject = resolveIdentitySubject({
+    providerMode: providerModeCode,
+    recipient,
+    subject,
+    identitySubject,
+  });
   return pedersen(
-    DOMAIN_COMMITMENT,
-    pedersen(BigInt(secret), BigInt(recipient))
+    resolveCommitmentDomain(providerModeCode),
+    pedersen(BigInt(secret), resolvedSubject)
   );
 }
 
@@ -139,14 +236,26 @@ export function computeIdentityNullifier({
   proofContext,
   recipient,
   claimKind,
+  subject,
+  identitySubject,
+  mockHumanIdHash,
+  providerMode = HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
 }) {
+  const providerModeCode = resolveHumanityProviderModeCode(providerMode);
+  const resolvedSubject = resolveIdentitySubject({
+    providerMode: providerModeCode,
+    recipient,
+    subject,
+    identitySubject,
+    mockHumanIdHash,
+  });
   return pedersen(
-    DOMAIN_NULLIFIER,
+    resolveNullifierDomain(providerModeCode),
     pedersen(
       BigInt(secret),
       pedersen(
         BigInt(claimKind),
-        pedersen(BigInt(proofContext), BigInt(recipient))
+        pedersen(BigInt(proofContext), resolvedSubject)
       )
     )
   );
@@ -244,19 +353,34 @@ export function buildProofPayload({
   eligibilityRoot,
   secret,
   expiry,
+  providerMode = HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
+  subject,
+  identitySubject,
+  mockHumanIdHash,
 }) {
   const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const resolvedVerifierConfigHash = resolveVerifierConfigHash({ verifierConfigHash, eligibilityRoot });
   const normalizedRecipient = BigInt(ethers.getAddress(recipient));
+  const resolvedIdentitySubject = resolveIdentitySubject({
+    providerMode,
+    recipient,
+    subject,
+    identitySubject,
+    mockHumanIdHash,
+  });
   const credentialCommitment = computeCredentialCommitment({
     secret,
     recipient: normalizedRecipient,
+    subject: resolvedIdentitySubject,
+    providerMode,
   });
   const identityNullifier = computeIdentityNullifier({
     secret,
     proofContext: resolvedProofContext,
     recipient: normalizedRecipient,
     claimKind,
+    subject: resolvedIdentitySubject,
+    providerMode,
   });
   const outputs = buildFactOutputs({
     verifierConfigHash: resolvedVerifierConfigHash,
@@ -309,6 +433,10 @@ export async function generateLocalMintProof({
   verifierConfigHash,
   eligibilityRoot,
   secret,
+  providerMode = HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
+  subject,
+  identitySubject,
+  mockHumanIdHash,
 }) {
   const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const resolvedVerifierConfigHash = resolveVerifierConfigHash({ verifierConfigHash, eligibilityRoot });
@@ -336,6 +464,10 @@ export async function generateLocalMintProof({
     verifierConfigHash: resolvedVerifierConfigHash,
     secret,
     expiry,
+    providerMode,
+    subject,
+    identitySubject,
+    mockHumanIdHash,
   });
 }
 
@@ -353,6 +485,10 @@ export async function generateLocalActionProof({
   verifierConfigHash,
   eligibilityRoot,
   secret,
+  providerMode = HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
+  subject,
+  identitySubject,
+  mockHumanIdHash,
 }) {
   const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const resolvedVerifierConfigHash = resolveVerifierConfigHash({ verifierConfigHash, eligibilityRoot });
@@ -377,6 +513,10 @@ export async function generateLocalActionProof({
     verifierConfigHash: resolvedVerifierConfigHash,
     secret,
     expiry,
+    providerMode,
+    subject,
+    identitySubject,
+    mockHumanIdHash,
   });
 }
 
@@ -391,6 +531,10 @@ export function prepareScarbInput({
   recipient,
   claimHash,
   claimKind,
+  providerMode = HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
+  subject,
+  identitySubject,
+  mockHumanIdHash,
 }) {
   const resolvedCommitmentRoot = resolveVerifierConfigHash({
     verifierConfigHash: commitmentRoot,
@@ -398,6 +542,14 @@ export function prepareScarbInput({
   });
   const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const split = splitClaimHash(claimHash);
+  const providerModeCode = resolveHumanityProviderModeCode(providerMode);
+  const resolvedIdentitySubject = resolveIdentitySubject({
+    providerMode: providerModeCode,
+    recipient,
+    subject,
+    identitySubject,
+    mockHumanIdHash,
+  });
   return [
     BigInt(secret),
     BigInt(siblings.length),
@@ -410,5 +562,7 @@ export function prepareScarbInput({
     split.hi,
     split.lo,
     BigInt(claimKind),
+    providerModeCode,
+    resolvedIdentitySubject,
   ];
 }

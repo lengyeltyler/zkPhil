@@ -11,4 +11,17 @@ describe('eligibility bundle guardrails', () => {
       })
     ).toThrow(/CREDENTIAL_BUNDLE_PATH/);
   });
+
+  it('rejects mock-humanity mode in production', () => {
+    expect(() =>
+      createEligibilityProvider({
+        env: {
+          HUMANITY_PROVIDER: 'mock',
+          NODE_ENV: 'production',
+          CHAIN_ID: '31337',
+        } as NodeJS.ProcessEnv,
+        isNullifierSpent: async () => false,
+      })
+    ).toThrow(/DEV\/TEST ONLY/);
+  });
 });
