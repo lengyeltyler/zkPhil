@@ -91,6 +91,7 @@ async function buildFixture() {
 
   const registryArtifact = await hre.artifacts.readArtifact('contracts/proofs/DevProofVerifier.sol:DevProofVerifier');
   const gateArtifact = await hre.artifacts.readArtifact('contracts/PhilIdentityGate.sol:PhilIdentityGate');
+  const verifierArtifact = await hre.artifacts.readArtifact('contracts/proofs/FactRegistryHumanityVerifier.sol:FactRegistryHumanityVerifier');
   const { registry, gate } = await deployFactProofGate({
     signer: deployer,
     deployContract: async (signer, artifact, args = []) => {
@@ -101,9 +102,10 @@ async function buildFixture() {
     },
     gateArtifact,
     registryArtifact,
+    verifierArtifact,
     programHash: PROGRAM_HASH,
     contextId: CONTEXT_ID,
-    eligibilityRoot: eligibility.bundle.eligibilityRoot,
+    verifierConfigHash: eligibility.bundle.verifierConfigHash,
     initialAuthorizedCaller: deployerAddress,
   });
   const gateAddress = await gate.getAddress();

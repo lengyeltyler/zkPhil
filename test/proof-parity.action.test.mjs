@@ -14,7 +14,7 @@ import {
 const PROGRAM_HASH = '0x4444444444444444444444444444444444444444444444444444444444444444';
 const CONTEXT_ID = 13n;
 const CHAIN_ID = 31337;
-const ELIGIBILITY_ROOT = 0x1234n;
+const VERIFIER_CONFIG_HASH = 0x1234n;
 
 function getArtifact(artifacts, name) {
   const artifact = artifacts[name];
@@ -55,11 +55,14 @@ test('proof hash parity (js <-> solidity) for mint + generic action claims', asy
     const registry = await deployContract(deployer, getArtifact(artifacts, 'DevProofVerifier'), [
       deployerAddr,
     ]);
-    const gate = await deployContract(deployer, getArtifact(artifacts, 'PhilIdentityGate'), [
+    const verifier = await deployContract(deployer, getArtifact(artifacts, 'FactRegistryHumanityVerifier'), [
       PROGRAM_HASH,
       CONTEXT_ID,
       await registry.getAddress(),
-      ELIGIBILITY_ROOT,
+      VERIFIER_CONFIG_HASH,
+    ]);
+    const gate = await deployContract(deployer, getArtifact(artifacts, 'PhilIdentityGate'), [
+      await verifier.getAddress(),
       deployerAddr,
     ]);
     const gateAddress = await gate.getAddress();
@@ -117,13 +120,12 @@ test('proof hash parity (js <-> solidity) for mint + generic action claims', asy
     const mintFactJs = computeFactHash({
       programHash: PROGRAM_HASH,
       outputs: [
-        ELIGIBILITY_ROOT,
+        VERIFIER_CONFIG_HASH,
         CONTEXT_ID,
         BigInt(aliceAddr),
         mintSplit.hi,
         mintSplit.lo,
         0x1111n,
-        0x22n,
         0x3333n,
         1n,
       ],
@@ -132,7 +134,6 @@ test('proof hash parity (js <-> solidity) for mint + generic action claims', asy
       aliceAddr,
       mintClaimSol,
       0x1111n,
-      0x22n,
       0x3333n,
       1
     );
@@ -142,13 +143,12 @@ test('proof hash parity (js <-> solidity) for mint + generic action claims', asy
     const actionFactJs = computeFactHash({
       programHash: PROGRAM_HASH,
       outputs: [
-        ELIGIBILITY_ROOT,
+        VERIFIER_CONFIG_HASH,
         CONTEXT_ID,
         BigInt(aliceAddr),
         actionSplit.hi,
         actionSplit.lo,
         0x4444n,
-        0x55n,
         0x6666n,
         2n,
       ],
@@ -157,7 +157,6 @@ test('proof hash parity (js <-> solidity) for mint + generic action claims', asy
       aliceAddr,
       actionClaimSol,
       0x4444n,
-      0x55n,
       0x6666n,
       2
     );

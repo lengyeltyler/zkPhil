@@ -16,6 +16,8 @@ function resolveArtifactName(name) {
       return 'contracts/mocks/MockRenderer.sol:MockRenderer';
     case 'DevProofVerifier':
       return 'contracts/proofs/DevProofVerifier.sol:DevProofVerifier';
+    case 'FactRegistryHumanityVerifier':
+      return 'contracts/proofs/FactRegistryHumanityVerifier.sol:FactRegistryHumanityVerifier';
     default:
       return `contracts/${name}.sol:${name}`;
   }
@@ -104,6 +106,7 @@ async function buildFixture() {
   const renderer = await deploy('MockRenderer', deployer);
   const registryArtifact = await hre.artifacts.readArtifact(resolveArtifactName('DevProofVerifier'));
   const gateArtifact = await hre.artifacts.readArtifact(resolveArtifactName('PhilIdentityGate'));
+  const verifierArtifact = await hre.artifacts.readArtifact(resolveArtifactName('FactRegistryHumanityVerifier'));
   const { registry, gate } = await deployFactProofGate({
     signer: deployer,
     deployContract: async (signer, artifact, args = []) => {
@@ -114,9 +117,10 @@ async function buildFixture() {
     },
     gateArtifact,
     registryArtifact,
+    verifierArtifact,
     programHash: PROGRAM_HASH,
     contextId: CONTEXT_ID,
-    eligibilityRoot: eligibility.bundle.eligibilityRoot,
+    verifierConfigHash: eligibility.bundle.verifierConfigHash,
     initialAuthorizedCaller: deployerAddress,
   });
 
@@ -302,6 +306,7 @@ describe('PhilIdentityGate fact-backed mint verification', function () {
     const { renderer, web3 } = await deployImmutableRendererSystem(deployer);
     const registryArtifact = await hre.artifacts.readArtifact(resolveArtifactName('DevProofVerifier'));
     const gateArtifact = await hre.artifacts.readArtifact(resolveArtifactName('PhilIdentityGate'));
+    const verifierArtifact = await hre.artifacts.readArtifact(resolveArtifactName('FactRegistryHumanityVerifier'));
     const { registry, gate } = await deployFactProofGate({
       signer: deployer,
       deployContract: async (signer, artifact, args = []) => {
@@ -312,9 +317,10 @@ describe('PhilIdentityGate fact-backed mint verification', function () {
       },
       gateArtifact,
       registryArtifact,
+      verifierArtifact,
       programHash: PROGRAM_HASH,
       contextId: CONTEXT_ID,
-      eligibilityRoot: eligibility.bundle.eligibilityRoot,
+      verifierConfigHash: eligibility.bundle.verifierConfigHash,
       initialAuthorizedCaller: deployerAddress,
     });
     const gateAddress = await gate.getAddress();

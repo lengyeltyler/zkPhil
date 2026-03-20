@@ -1,5 +1,5 @@
 /**
- * Phil Identity Mint Page (Eligibility Proofs + EIP-4337)
+ * Phil Identity Mint Page (Humanity-ready local proofs + EIP-4337)
  */
 
 import {
@@ -795,9 +795,9 @@ function clearError() {
 
 function getEligibilityMessage() {
   if (!state.address || !state.hasCorrectNetwork) return "";
-  if (!state.eligibilityChecked) return "Checking eligibility...";
+  if (!state.eligibilityChecked) return "Checking identity eligibility...";
   if (state.eligibilityEligible) return "";
-  return "Not eligible to issue a Phil identity";
+  return "This wallet is not currently eligible to create a Phil identity";
 }
 
 async function refreshEligibility({ suppressErrors = false } = {}) {
@@ -828,7 +828,7 @@ async function refreshEligibility({ suppressErrors = false } = {}) {
     state.eligibilityEligible = false;
     state.eligibilityRemaining = 0;
     if (!suppressErrors) {
-      setError(`Failed to check eligibility: ${err?.message || "Unknown error"}`);
+      setError(`Failed to check identity eligibility: ${err?.message || "Unknown error"}`);
     }
   }
 
@@ -2046,7 +2046,7 @@ async function doMint() {
     await refreshEligibility();
   }
   if (!state.eligibilityEligible) {
-    setError("Not eligible to issue a Phil identity.");
+    setError("This wallet is not currently eligible to create a Phil identity.");
     return;
   }
 

@@ -74,7 +74,7 @@ test('PhilPaymaster accepts the current mint calldata shape', async () => {
       {
         expiry: BigInt(now + 600),
         factHash: `0x${'11'.repeat(32)}`,
-        signature: `0x${'22'.repeat(96)}`,
+        signature: `0x${'22'.repeat(64)}`,
       },
     ]);
 
@@ -148,7 +148,7 @@ test('PhilPaymaster rejects paymasterAndData with trailing bytes', async () => {
       {
         expiry: BigInt(now + 600),
         factHash: `0x${'11'.repeat(32)}`,
-        signature: `0x${'22'.repeat(96)}`,
+        signature: `0x${'22'.repeat(64)}`,
       },
     ]);
 

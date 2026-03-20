@@ -12,9 +12,9 @@ import requestMintRoute from './requestMint.js';
 import signPaymasterRoute from './signPaymaster.js';
 import { createEligibilityProvider } from '../lib/eligibility.js';
 import { PhilDatabase } from '../lib/db.js';
-import { buildEligibilityBundle } from '../../../shared/proof/eligibilityBundle.mjs';
+import { buildCredentialBundle } from '../../../shared/proof/credentialBundle.mjs';
 
-const CONTEXT_ID = '13';
+const PROOF_CONTEXT = '13';
 const PROGRAM_HASH = '0x' + '44'.repeat(32);
 const CHAIN_ID = 31337;
 const MNEMONIC = 'test test test test test test test test test test test junk';
@@ -248,10 +248,10 @@ async function createHarness(): Promise<Harness> {
     "m/44'/60'/0'/0/2"
   ).connect(provider);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-sign-paymaster-'));
-  const bundlePath = path.join(tempDir, 'eligibility-bundle.json');
-  const bundle = buildEligibilityBundle({
-    contextId: CONTEXT_ID,
-    entries: [{ recipient: recipientWallet.address, credentialSlot: 0 }],
+  const bundlePath = path.join(tempDir, 'credential-bundle.json');
+  const bundle = buildCredentialBundle({
+    proofContext: PROOF_CONTEXT,
+    entries: [{ recipient: recipientWallet.address, credentialNonce: 0 }],
     seed: 'sign-paymaster-test',
   });
   fs.writeFileSync(bundlePath, JSON.stringify(bundle, null, 2));
@@ -259,11 +259,14 @@ async function createHarness(): Promise<Harness> {
   const registry = await deployContract(deployer, readArtifact('DevProofVerifier'), [
     await deployer.getAddress(),
   ]);
-  const gate = await deployContract(deployer, readArtifact('PhilIdentityGate'), [
+  const verifier = await deployContract(deployer, readArtifact('FactRegistryHumanityVerifier'), [
     PROGRAM_HASH,
-    BigInt(CONTEXT_ID),
+    BigInt(PROOF_CONTEXT),
     await registry.getAddress(),
-    bundle.eligibilityRoot,
+    bundle.verifierConfigHash,
+  ]);
+  const gate = await deployContract(deployer, readArtifact('PhilIdentityGate'), [
+    await verifier.getAddress(),
     await deployer.getAddress(),
   ]);
   const mockStarknetCore = await deployContract(deployer, readArtifact('MockStarknetCore'));
@@ -295,19 +298,19 @@ async function createHarness(): Promise<Harness> {
 
   await app.register(authRoute, {
     db,
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     chainId: CHAIN_ID,
     proofGateAddress: await gate.getAddress(),
   });
 
   await app.register(requestMintRoute, {
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     programHash: PROGRAM_HASH,
     chainId: CHAIN_ID,
     proofGateAddress: await gate.getAddress(),
     eligibilityProvider: createEligibilityProvider({
       env: {
-        ELIGIBILITY_BUNDLE_PATH: bundlePath,
+        CREDENTIAL_BUNDLE_PATH: bundlePath,
       } as NodeJS.ProcessEnv,
       isNullifierSpent: async (nullifier) => Boolean(await gate.isNullifierSpent(nullifier)),
       isProofReserved: async (proofMetadata) =>

@@ -49,16 +49,17 @@ test('frontend-selected combo is exactly persisted and rendered on-chain', async
 
     const deployerAddress = await deployer.getAddress();
     const nonce = await provider.getTransactionCount(deployerAddress);
-    const expectedMint = ethers.getCreateAddress({ from: deployerAddress, nonce: nonce + 2 });
+    const expectedMint = ethers.getCreateAddress({ from: deployerAddress, nonce: nonce + 3 });
 
     const { registry, gate } = await deployFactProofGate({
       signer: deployer,
       deployContract,
       gateArtifact: getArtifact(artifacts, 'PhilIdentityGate'),
       registryArtifact: getArtifact(artifacts, 'DevProofVerifier'),
+      verifierArtifact: getArtifact(artifacts, 'FactRegistryHumanityVerifier'),
       programHash: PROGRAM_HASH,
       contextId: CONTEXT_ID,
-      eligibilityRoot: eligibility.bundle.eligibilityRoot,
+      verifierConfigHash: eligibility.bundle.verifierConfigHash,
       initialAuthorizedCaller: expectedMint,
     });
 

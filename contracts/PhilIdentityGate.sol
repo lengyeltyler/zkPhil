@@ -2,28 +2,23 @@
 pragma solidity ^0.8.24;
 
 import {IProofGate} from "./IProofGate.sol";
-import {ISharpFactRegistry} from "./proofs/ISharpFactRegistry.sol";
+import {IHumanityVerifier} from "./IHumanityVerifier.sol";
 
 /// @title PhilIdentityGate
-/// @notice Fact-registry-backed eligibility verifier for Phil identity issuance flows.
-/// @dev The client proves an eligibility claim locally, then a registry
-///      acknowledges the resulting fact hash. This contract only consumes
-///      registered facts and never trusts a backend signer for authorization.
+/// @notice Identity gate that consumes provider-agnostic humanity proofs.
+/// @dev The gate is responsible only for claim binding, caller authorization,
+///      and one-identity-per-nullifier replay protection. The current
+///      fact-registry bridge lives behind `humanityVerifier`.
 contract PhilIdentityGate is IProofGate {
     uint8 public constant ACTION_MINT = 1;
     uint8 public constant ACTION_ACCOUNT_CREATE = 2;
     uint8 public constant ACTION_CADENCE_MINT = 4;
     uint8 public constant ACTION_CADENCE_RESERVE = 5;
 
-    bytes32 public immutable PROGRAM_HASH;
-    uint256 public immutable CONTEXT_ID;
-
     address public owner;
+    IHumanityVerifier public humanityVerifier;
     mapping(address => bool) public authorizedCaller;
     mapping(bytes32 => bool) public nullifierUsed;
-
-    ISharpFactRegistry public factRegistry;
-    uint256 public eligibilityRoot;
 
     event NullifierConsumed(
         bytes32 indexed nullifier,
@@ -33,47 +28,27 @@ contract PhilIdentityGate is IProofGate {
         bytes32 actionHash
     );
     event AuthorizedCallerUpdated(address indexed caller, bool allowed);
-    event FactRegistryUpdated(address indexed previousRegistry, address indexed newRegistry);
-    event EligibilityRootUpdated(uint256 previousRoot, uint256 newRoot);
+    event HumanityVerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     error NullifierAlreadyUsed();
-    error InvalidFactHash();
-    error MissingRegisteredFact();
     error ProofExpired();
     error UnauthorizedCaller();
     error NotOwner();
     error InvalidAuthorizedCaller();
     error InvalidActionType();
-    error InvalidFactRegistry();
-    error InvalidProofMetadata();
+    error InvalidHumanityVerifier();
 
-    struct DecodedProofMetadata {
-        uint256 nullifier;
-        uint256 credentialSlot;
-        uint256 credentialLeaf;
-    }
-
-    constructor(
-        bytes32 programHash_,
-        uint256 contextId_,
-        address factRegistry_,
-        uint256 eligibilityRoot_,
-        address initialAuthorizedCaller_
-    ) {
-        if (factRegistry_ == address(0)) revert InvalidFactRegistry();
+    constructor(address humanityVerifier_, address initialAuthorizedCaller_) {
+        if (humanityVerifier_ == address(0)) revert InvalidHumanityVerifier();
         if (initialAuthorizedCaller_ == address(0)) revert InvalidAuthorizedCaller();
 
-        PROGRAM_HASH = programHash_;
-        CONTEXT_ID = contextId_;
         owner = msg.sender;
-        factRegistry = ISharpFactRegistry(factRegistry_);
-        eligibilityRoot = eligibilityRoot_;
+        humanityVerifier = IHumanityVerifier(humanityVerifier_);
         authorizedCaller[initialAuthorizedCaller_] = true;
 
         emit OwnershipTransferred(address(0), msg.sender);
-        emit FactRegistryUpdated(address(0), factRegistry_);
-        emit EligibilityRootUpdated(0, eligibilityRoot_);
+        emit HumanityVerifierUpdated(address(0), humanityVerifier_);
         emit AuthorizedCallerUpdated(initialAuthorizedCaller_, true);
     }
 
@@ -95,17 +70,23 @@ contract PhilIdentityGate is IProofGate {
         emit AuthorizedCallerUpdated(caller, allowed);
     }
 
-    function setFactRegistry(address newRegistry) external onlyOwner {
-        if (newRegistry == address(0)) revert InvalidFactRegistry();
-        address previousRegistry = address(factRegistry);
-        factRegistry = ISharpFactRegistry(newRegistry);
-        emit FactRegistryUpdated(previousRegistry, newRegistry);
+    function setHumanityVerifier(address newVerifier) external onlyOwner {
+        if (newVerifier == address(0)) revert InvalidHumanityVerifier();
+        address previousVerifier = address(humanityVerifier);
+        humanityVerifier = IHumanityVerifier(newVerifier);
+        emit HumanityVerifierUpdated(previousVerifier, newVerifier);
     }
 
-    function setEligibilityRoot(uint256 newRoot) external onlyOwner {
-        uint256 previousRoot = eligibilityRoot;
-        eligibilityRoot = newRoot;
-        emit EligibilityRootUpdated(previousRoot, newRoot);
+    function PROGRAM_HASH() public view returns (bytes32) {
+        return humanityVerifier.PROGRAM_HASH();
+    }
+
+    function PROOF_CONTEXT() public view returns (uint256) {
+        return humanityVerifier.PROOF_CONTEXT();
+    }
+
+    function verifierConfigHash() public view returns (uint256) {
+        return humanityVerifier.verifierConfigHash();
     }
 
     function verifyAndConsume(
@@ -129,13 +110,13 @@ contract PhilIdentityGate is IProofGate {
             mixSeed,
             proof.expiry
         );
-        DecodedProofMetadata memory metadata = _verifyFactProof(
+        (uint256 identityNullifier,) = humanityVerifier.verifyHumanityProof(
             recipient,
             claimHash,
             ACTION_MINT,
             proof
         );
-        _consumeNullifier(_nullifierKey(metadata.nullifier), recipient, proof.factHash, ACTION_MINT, mintActionHash);
+        _consumeNullifier(_nullifierKey(identityNullifier), recipient, proof.factHash, ACTION_MINT, mintActionHash);
     }
 
     function verifyActionAndConsume(
@@ -146,15 +127,16 @@ contract PhilIdentityGate is IProofGate {
     ) external override {
         _requireAuthorizedCaller();
         if (actionType == 0) revert InvalidActionType();
+        if (proof.expiry != 0 && block.timestamp > proof.expiry) revert ProofExpired();
 
         bytes32 claimHash = computeActionClaimHash(recipient, actionType, actionHash, proof.expiry);
-        DecodedProofMetadata memory metadata = _verifyFactProof(
+        (uint256 identityNullifier,) = humanityVerifier.verifyHumanityProof(
             recipient,
             claimHash,
             actionType,
             proof
         );
-        _consumeNullifier(_nullifierKey(metadata.nullifier), recipient, proof.factHash, actionType, actionHash);
+        _consumeNullifier(_nullifierKey(identityNullifier), recipient, proof.factHash, actionType, actionHash);
     }
 
     function computeMintActionHash(
@@ -178,8 +160,8 @@ contract PhilIdentityGate is IProofGate {
     ) public view returns (bytes32) {
         return keccak256(
             abi.encode(
-                PROGRAM_HASH,
-                CONTEXT_ID,
+                PROGRAM_HASH(),
+                PROOF_CONTEXT(),
                 block.chainid,
                 address(this),
                 recipient,
@@ -201,8 +183,8 @@ contract PhilIdentityGate is IProofGate {
     ) public view returns (bytes32) {
         return keccak256(
             abi.encode(
-                PROGRAM_HASH,
-                CONTEXT_ID,
+                PROGRAM_HASH(),
+                PROOF_CONTEXT(),
                 block.chainid,
                 address(this),
                 recipient,
@@ -216,27 +198,17 @@ contract PhilIdentityGate is IProofGate {
     function computeExpectedFactHash(
         address recipient,
         bytes32 claimHash,
-        uint256 nullifier,
-        uint256 credentialSlot,
-        uint256 credentialLeaf,
+        uint256 identityNullifier,
+        uint256 credentialCommitment,
         uint8 claimKind
     ) public view returns (bytes32) {
-        uint256 claimHashHi = uint256(claimHash) >> 128;
-        uint256 claimHashLo = uint128(uint256(claimHash));
-        bytes32 outputsHash = keccak256(
-            abi.encodePacked(
-                eligibilityRoot,
-                CONTEXT_ID,
-                uint256(uint160(recipient)),
-                claimHashHi,
-                claimHashLo,
-                nullifier,
-                credentialSlot,
-                credentialLeaf,
-                uint256(claimKind)
-            )
+        return humanityVerifier.computeExpectedFactHash(
+            recipient,
+            claimHash,
+            identityNullifier,
+            credentialCommitment,
+            claimKind
         );
-        return keccak256(abi.encode(PROGRAM_HASH, outputsHash));
     }
 
     function isNullifierSpent(uint256 nullifier) external view override returns (bool) {
@@ -245,37 +217,6 @@ contract PhilIdentityGate is IProofGate {
 
     function _requireAuthorizedCaller() internal view {
         if (!authorizedCaller[msg.sender]) revert UnauthorizedCaller();
-    }
-
-    function _verifyFactProof(
-        address recipient,
-        bytes32 claimHash,
-        uint8 claimKind,
-        MintProof calldata proof
-    ) internal view returns (DecodedProofMetadata memory metadata) {
-        if (proof.expiry != 0 && block.timestamp > proof.expiry) revert ProofExpired();
-
-        metadata = _decodeProofMetadata(proof.signature);
-        bytes32 expectedFactHash = computeExpectedFactHash(
-            recipient,
-            claimHash,
-            metadata.nullifier,
-            metadata.credentialSlot,
-            metadata.credentialLeaf,
-            claimKind
-        );
-        if (expectedFactHash != proof.factHash) revert InvalidFactHash();
-        if (!factRegistry.isValid(proof.factHash)) revert MissingRegisteredFact();
-    }
-
-    function _decodeProofMetadata(bytes calldata encoded)
-        internal
-        pure
-        returns (DecodedProofMetadata memory metadata)
-    {
-        if (encoded.length != 96) revert InvalidProofMetadata();
-        (metadata.nullifier, metadata.credentialSlot, metadata.credentialLeaf) =
-            abi.decode(encoded, (uint256, uint256, uint256));
     }
 
     function _nullifierKey(uint256 nullifier) internal pure returns (bytes32) {

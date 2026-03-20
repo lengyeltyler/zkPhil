@@ -2,43 +2,49 @@
 
 ## What changed
 
-- Mint authorization no longer depends on backend ECDSA signatures.
-- The core model is now eligibility-based identity issuance, not allowlist/Test13 membership.
-- `MintProof.signature` now carries ABI-encoded proof metadata:
-  - `abi.encode(uint256 nullifier, uint256 credentialSlot, uint256 credentialLeaf)`
-- `request-mint` now returns:
-  - `proof`
-  - `provingRequest`
-- The frontend/browser mint flow now calls a localhost prover service.
-- `PhilIdentityGate` verifies fact validity plus nullifier replay protection.
-- `PhilPaymaster` was updated to the new 96-byte proof-metadata format.
+- Phil mint authorization no longer depends on backend ECDSA signatures.
+- The active identity gate now depends on `IHumanityVerifier`.
+- The current verifier implementation is `FactRegistryHumanityVerifier`.
+- `MintProof.signature` now encodes:
+  - `abi.encode(uint256 identityNullifier, uint256 credentialCommitment)`
+- the local proving request moved from list-era fields to:
+  - `verifierConfigHash`
+  - `credentialSecret`
+  - `commitmentWitness`
+  - `expectedIdentityNullifier`
+  - `expectedCredentialCommitment`
+- the current Cairo program moved to [`cairo/src/credential.cairo`](./cairo/src/credential.cairo)
 
-## New environment variables
+## New preferred environment variables
 
-- `CONTEXT_ID`
-- `ELIGIBILITY_BUNDLE_PATH`
+- `PROOF_CONTEXT`
+- `CREDENTIAL_BUNDLE_PATH`
+- `VERIFIER_CONFIG_HASH`
 - `FACT_REGISTRY`
-- `FACT_REGISTRY_OPERATOR_KEY` for local `31337`
+- `FACT_REGISTRY_OPERATOR_KEY`
 - `LOCAL_PROVER_HOST`
 - `LOCAL_PROVER_PORT`
 - `LOCAL_PROVER_MANIFEST`
 - `LOCAL_PROVER_ENABLE_PROVE`
 - `LOCAL_PROVER_ENABLE_VERIFY`
 
+Legacy aliases such as `CONTEXT_ID`, `ELIGIBILITY_BUNDLE_PATH`, and `ELIGIBILITY_ROOT` are tolerated only as compatibility fallbacks in a few scripts.
+
 ## Removed from the production authorization path
 
 - `ALLOWLIST_SIGNER`
 - `ALLOWLIST_SIGNER_KEY`
+- backend-issued mint signatures as a trust root
 
 ## Local proving workflow
 
-Build the eligibility bundle:
+Build the credential bundle:
 
 ```bash
-node scripts/proofs/build_eligibility_bundle.mjs \
-  --in eligibility.json \
-  --out artifacts/proofs/eligibility-bundle.json \
-  --contextId 13
+node scripts/proofs/build_credential_bundle.mjs \
+  --in credentials.json \
+  --out artifacts/proofs/credential-bundle.json \
+  --proofContext 13
 ```
 
 Start the local prover service:
@@ -69,30 +75,29 @@ node scripts/proofs/prove_local.mjs \
 
 ### Request artifact
 
-`zkphil-local-proof-request-v1`
+`zkphil-local-proof-request-v2`
 
 Contains:
 
+- `provider`
 - `kind`
 - `claimKind`
 - `recipient`
-- `eligibilityRoot`
-- `credentialSlot`
-- `secret`
-- `siblings`
-- `pathIndices`
+- `verifierConfigHash`
+- `credentialSecret`
+- `commitmentWitness`
 - `claimHash`
 - `expectedFactHash`
 - `expectedProofMetadata`
-- `expectedNullifier`
-- `expectedLeaf`
+- `expectedIdentityNullifier`
+- `expectedCredentialCommitment`
 - `programHash`
-- `contextId`
+- `proofContext`
 - `expiry`
 
 ### Proof artifact
 
-`zkphil-stwo-proof-artifact-v1`
+`zkphil-stwo-proof-artifact-v2`
 
 Contains:
 
@@ -105,7 +110,6 @@ Contains:
 
 ## Current limitation
 
-- This repo does not yet provide direct Ethereum-side verification of S-two proof artifacts.
-- The implemented production-compatible bridge is fact-registry-based verification.
-- Local proof registration is fully wired for `31337` via `DevProofVerifier`.
-- Future human-verification providers are not implemented yet; the current insertion point is the eligibility root / credential preparation layer.
+- Direct Ethereum-side verification of S-two proof artifacts is still not implemented here.
+- The active production bridge is fact-registry-based verification.
+- Future proof-of-human providers such as World are intentionally not implemented yet.

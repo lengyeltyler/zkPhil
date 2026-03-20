@@ -1,44 +1,47 @@
 import { ethers } from 'ethers';
 
-import { buildEligibilityBundle, getRecipientCredentials } from '../shared/proof/eligibilityBundle.mjs';
+import { buildCredentialBundle, getRecipientCredentials } from '../shared/proof/credentialBundle.mjs';
 import {
   generateLocalActionProof,
   generateLocalMintProof,
 } from '../shared/proof/localStarkProver.mjs';
 
-export function createEligibilityContext(addresses, { contextId, credentialsPerAddress, seed } = {}) {
-  if (contextId == null) {
-    throw new Error('contextId is required for test eligibility fixtures');
+export function createEligibilityContext(addresses, { proofContext, contextId, credentialsPerAddress, seed } = {}) {
+  const resolvedProofContext = proofContext ?? contextId;
+  if (resolvedProofContext == null) {
+    throw new Error('proofContext is required for test credential fixtures');
   }
   const resolvedCredentialsPerAddress = credentialsPerAddress ?? 1;
   const entries = [];
   for (const address of addresses) {
-    for (let credentialSlot = 0; credentialSlot < resolvedCredentialsPerAddress; credentialSlot += 1) {
-      entries.push({ recipient: address, credentialSlot });
+    for (let credentialNonce = 0; credentialNonce < resolvedCredentialsPerAddress; credentialNonce += 1) {
+      entries.push({ recipient: address, credentialNonce });
     }
   }
 
-  const bundle = buildEligibilityBundle({
-    contextId,
+  const bundle = buildCredentialBundle({
+    proofContext: resolvedProofContext,
     entries,
     seed,
   });
 
   return {
     bundle,
-    credentialFor(address, credentialSlot = 0) {
+    credentialFor(address, credentialIndex = 0) {
       const credentials = getRecipientCredentials(bundle, address);
-      const entry = credentials.find((candidate) => Number(candidate.credentialSlot) === credentialSlot);
+      const entry = credentials[credentialIndex];
       if (!entry) {
-        throw new Error(`missing eligibility credential for ${address} credentialSlot ${credentialSlot}`);
+        throw new Error(`missing credential for ${address} at index ${credentialIndex}`);
       }
       return {
-        eligibilityRoot: bundle.eligibilityRoot,
-        credentialSlot: entry.credentialSlot,
-        secret: entry.secret,
-        credentialLeaf: entry.credentialLeaf,
-        siblings: entry.siblings,
-        pathIndices: entry.pathIndices,
+        verifierConfigHash: bundle.verifierConfigHash,
+        credentialSecret: entry.secret,
+        credentialCommitment: entry.credentialCommitment,
+        commitmentWitness: {
+          commitmentRoot: bundle.verifierConfigHash,
+          siblings: entry.siblings,
+          pathIndices: entry.pathIndices,
+        },
       };
     },
   };
@@ -57,23 +60,29 @@ export async function deployFactProofGate({
   deployContract,
   gateArtifact,
   registryArtifact,
+  verifierArtifact,
   programHash,
+  proofContext,
   contextId,
-  eligibilityRoot,
+  verifierConfigHash,
   initialAuthorizedCaller,
 }) {
   const operator = await signer.getAddress();
   const registry = await deployContract(signer, registryArtifact, [operator]);
-  const gate = await deployContract(signer, gateArtifact, [
+  const verifier = await deployContract(signer, verifierArtifact, [
     programHash,
-    contextId,
+    proofContext ?? contextId,
     await registry.getAddress(),
-    eligibilityRoot,
+    verifierConfigHash,
+  ]);
+  const gate = await deployContract(signer, gateArtifact, [
+    await verifier.getAddress(),
     initialAuthorizedCaller,
   ]);
 
   return {
     registry,
+    verifier,
     gate,
   };
 }
@@ -85,6 +94,7 @@ export async function registerProofFact(registry, proof) {
 export async function buildMintProof({
   credential,
   programHash,
+  proofContext,
   contextId,
   chainId,
   proofGateAddress,
@@ -98,7 +108,7 @@ export async function buildMintProof({
 }) {
   return generateLocalMintProof({
     programHash,
-    contextId,
+    proofContext: proofContext ?? contextId,
     chainId,
     proofGateAddress,
     recipient,
@@ -108,15 +118,15 @@ export async function buildMintProof({
     mixMode,
     mixSeed,
     expiry,
-    eligibilityRoot: credential.eligibilityRoot,
-    secret: credential.secret,
-    credentialSlot: credential.credentialSlot,
+    verifierConfigHash: credential.verifierConfigHash,
+    secret: credential.credentialSecret,
   });
 }
 
 export async function buildActionProof({
   credential,
   programHash,
+  proofContext,
   contextId,
   chainId,
   proofGateAddress,
@@ -127,16 +137,15 @@ export async function buildActionProof({
 }) {
   return generateLocalActionProof({
     programHash,
-    contextId,
+    proofContext: proofContext ?? contextId,
     chainId,
     proofGateAddress,
     recipient,
     actionType,
     actionHash,
     expiry,
-    eligibilityRoot: credential.eligibilityRoot,
-    secret: credential.secret,
-    credentialSlot: credential.credentialSlot,
+    verifierConfigHash: credential.verifierConfigHash,
+    secret: credential.credentialSecret,
   });
 }
 
@@ -144,6 +153,7 @@ export async function buildAndRegisterMintProof({
   registry,
   credential,
   programHash,
+  proofContext,
   contextId,
   chainId,
   proofGateAddress,
@@ -158,7 +168,7 @@ export async function buildAndRegisterMintProof({
   const proof = await buildMintProof({
     credential,
     programHash,
-    contextId,
+    proofContext: proofContext ?? contextId,
     chainId,
     proofGateAddress,
     recipient,
@@ -177,6 +187,7 @@ export async function buildAndRegisterActionProof({
   registry,
   credential,
   programHash,
+  proofContext,
   contextId,
   chainId,
   proofGateAddress,
@@ -188,7 +199,7 @@ export async function buildAndRegisterActionProof({
   const proof = await buildActionProof({
     credential,
     programHash,
-    contextId,
+    proofContext: proofContext ?? contextId,
     chainId,
     proofGateAddress,
     recipient,

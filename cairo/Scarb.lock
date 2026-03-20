@@ -2,5 +2,5 @@
 version = 1
 
 [[package]]
-name = "phil_eligibility"
+name = "phil_identity_proof"
 version = "0.1.0"

@@ -10,10 +10,10 @@ import authRoute from './auth.js';
 import requestMintRoute from './requestMint.js';
 import { createEligibilityProvider } from '../lib/eligibility.js';
 import { PhilDatabase } from '../lib/db.js';
-import { buildEligibilityBundle } from '../../../shared/proof/eligibilityBundle.mjs';
+import { buildCredentialBundle } from '../../../shared/proof/credentialBundle.mjs';
 import { buildProofPayload, computeClaimHash } from '../../../shared/proof/localStarkProver.mjs';
 
-const CONTEXT_ID = '13';
+const PROOF_CONTEXT = '13';
 const PROGRAM_HASH = '0x' + '44'.repeat(32);
 const PROOF_GATE = '0x1000000000000000000000000000000000000013';
 const CHAIN_ID = 31337;
@@ -30,22 +30,22 @@ function resolveLegacyMintRecipient(recipient: string): string {
   return ethers.getAddress(recipient).toLowerCase();
 }
 
-function buildEligibilityBundleFile(entries: Record<string, number>, seed: string) {
+function buildCredentialBundleFile(entries: Record<string, number>, seed: string) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-request-mint-'));
-  const bundlePath = path.join(tempDir, 'eligibility-bundle.json');
-  const bundleEntries: Array<{ recipient: string; credentialSlot: number }> = [];
+  const bundlePath = path.join(tempDir, 'credential-bundle.json');
+  const bundleEntries: Array<{ recipient: string; credentialNonce: number }> = [];
 
   for (const [recipient, credentials] of Object.entries(entries)) {
-    for (let credentialSlot = 0; credentialSlot < credentials; credentialSlot += 1) {
+    for (let credentialNonce = 0; credentialNonce < credentials; credentialNonce += 1) {
       bundleEntries.push({
         recipient,
-        credentialSlot,
+        credentialNonce,
       });
     }
   }
 
-  const bundle = buildEligibilityBundle({
-    contextId: CONTEXT_ID,
+  const bundle = buildCredentialBundle({
+    proofContext: PROOF_CONTEXT,
     entries: bundleEntries,
     seed,
   });
@@ -66,23 +66,23 @@ async function createApp(
 ) {
   const db = new PhilDatabase(':memory:');
   const app = Fastify();
-  const bundleFixture = buildEligibilityBundleFile(entries, 'request-mint-route-test');
+  const bundleFixture = buildCredentialBundleFile(entries, 'request-mint-route-test');
 
   await app.register(authRoute, {
     db,
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     chainId: CHAIN_ID,
     proofGateAddress: PROOF_GATE,
   });
 
   await app.register(requestMintRoute, {
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     programHash: PROGRAM_HASH,
     chainId: CHAIN_ID,
     proofGateAddress: PROOF_GATE,
     eligibilityProvider: createEligibilityProvider({
       env: {
-        ELIGIBILITY_BUNDLE_PATH: bundleFixture.bundlePath,
+        CREDENTIAL_BUNDLE_PATH: bundleFixture.bundlePath,
       } as NodeJS.ProcessEnv,
       isNullifierSpent: async () => false,
       isProofReserved: async (proofMetadata) =>
@@ -292,7 +292,7 @@ describe('/request-mint local proving flow', () => {
       const after = Math.floor(Date.now() / 1000);
       const claimHash = computeClaimHash({
         programHash: PROGRAM_HASH,
-        contextId: BigInt(CONTEXT_ID),
+        proofContext: BigInt(PROOF_CONTEXT),
         chainId: BigInt(CHAIN_ID),
         proofGateAddress: PROOF_GATE,
         recipient: wallet.address,
@@ -305,13 +305,12 @@ describe('/request-mint local proving flow', () => {
       });
       const proof = buildProofPayload({
         programHash: PROGRAM_HASH,
-        contextId: BigInt(CONTEXT_ID),
+        proofContext: BigInt(PROOF_CONTEXT),
         recipient: wallet.address,
         claimHash,
         claimKind: 1,
-        eligibilityRoot: bundle.eligibilityRoot,
-        secret: body.provingRequest.secret,
-        credentialSlot: body.provingRequest.credentialSlot,
+        verifierConfigHash: bundle.verifierConfigHash,
+        secret: body.provingRequest.credentialSecret,
         expiry,
       });
 
@@ -326,7 +325,7 @@ describe('/request-mint local proving flow', () => {
         signature: proof.signature,
       });
       expect(body.provingRequest).toMatchObject({
-        schema: 'zkphil-local-proof-request-v1',
+        schema: 'zkphil-local-proof-request-v2',
         provingMode: 'scarb-stwo',
         kind: 'mint',
         claimKind: 1,

@@ -3,8 +3,8 @@ import { hash } from 'starknet';
 
 import {
   ACTION_MINT,
-  computeLeaf,
-  computeNullifier,
+  computeCredentialCommitment,
+  computeIdentityNullifier,
 } from './localStarkProver.mjs';
 
 function pedersen(a, b) {
@@ -15,15 +15,15 @@ export function normalizeAddress(address) {
   return ethers.getAddress(address).toLowerCase();
 }
 
-export function deriveSecret({
-  seed = 'zkphil-local-eligibility',
+export function deriveCredentialSecret({
+  seed = 'zkphil-local-credential',
   recipient,
-  credentialSlot,
+  credentialNonce = 0,
 }) {
   const digest = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       ['string', 'address', 'uint256'],
-      [seed, ethers.getAddress(recipient), BigInt(credentialSlot)]
+      [seed, ethers.getAddress(recipient), BigInt(credentialNonce)]
     )
   );
   return BigInt(digest) >> 8n;
@@ -36,24 +36,23 @@ export function buildPedersenMerkleTree(entries) {
 
   const normalizedEntries = entries.map((entry, index) => {
     const recipient = normalizeAddress(entry.recipient);
-    const credentialSlot = BigInt(entry.credentialSlot ?? index);
+    const credentialNonce = BigInt(entry.credentialNonce ?? index);
     const secret = entry.secret != null
       ? BigInt(entry.secret)
-      : deriveSecret({ recipient, credentialSlot });
-    const credentialLeaf = computeLeaf({
+      : deriveCredentialSecret({ recipient, credentialNonce });
+    const credentialCommitment = computeCredentialCommitment({
       secret,
       recipient: BigInt(recipient),
-      credentialSlot,
     });
     return {
       recipient,
-      credentialSlot,
+      credentialNonce,
       secret,
-      credentialLeaf,
+      credentialCommitment,
     };
   });
 
-  const layers = [normalizedEntries.map((entry) => entry.credentialLeaf)];
+  const layers = [normalizedEntries.map((entry) => entry.credentialCommitment)];
   while (layers[layers.length - 1].length > 1) {
     const prev = layers[layers.length - 1];
     const next = [];
@@ -91,30 +90,33 @@ export function buildPedersenMerkleTree(entries) {
   };
 }
 
-export function buildEligibilityBundle({
+export function buildCredentialBundle({
+  proofContext,
   contextId,
   entries,
   seed,
 }) {
-  if (contextId == null) {
-    throw new Error('contextId is required when building an eligibility bundle');
+  const resolvedProofContext = proofContext ?? contextId;
+  if (resolvedProofContext == null) {
+    throw new Error('proofContext is required when building a credential bundle');
   }
+
   const ordered = [...entries]
-    .map((entry) => ({
+    .map((entry, index) => ({
       recipient: normalizeAddress(entry.recipient),
-      credentialSlot: BigInt(entry.credentialSlot ?? 0),
+      credentialNonce: BigInt(entry.credentialNonce ?? index),
       secret: entry.secret != null ? BigInt(entry.secret) : undefined,
     }))
     .sort((a, b) => (
       a.recipient === b.recipient
-        ? Number(a.credentialSlot - b.credentialSlot)
+        ? Number(a.credentialNonce - b.credentialNonce)
         : a.recipient.localeCompare(b.recipient)
     ))
     .map((entry) => ({
       ...entry,
       secret:
         entry.secret ??
-        deriveSecret({ seed, recipient: entry.recipient, credentialSlot: entry.credentialSlot }),
+        deriveCredentialSecret({ seed, recipient: entry.recipient, credentialNonce: entry.credentialNonce }),
     }));
 
   const tree = buildPedersenMerkleTree(ordered);
@@ -122,9 +124,9 @@ export function buildEligibilityBundle({
   for (const entry of tree.entries) {
     const bucket = credentialsByRecipient[entry.recipient] || [];
     bucket.push({
-      credentialSlot: entry.credentialSlot.toString(),
+      credentialNonce: entry.credentialNonce.toString(),
       secret: entry.secret.toString(),
-      credentialLeaf: entry.credentialLeaf.toString(),
+      credentialCommitment: entry.credentialCommitment.toString(),
       index: entry.index,
       siblings: entry.proof.siblings.map((value) => value.toString()),
       pathIndices: entry.proof.pathIndices,
@@ -133,10 +135,11 @@ export function buildEligibilityBundle({
   }
 
   return {
-    schema: 'zkphil-eligibility-bundle-v1',
+    schema: 'zkphil-credential-bundle-v2',
+    provider: 'local-credential-commitment',
     generatedAt: new Date().toISOString(),
-    contextId: BigInt(contextId).toString(),
-    eligibilityRoot: tree.root.toString(),
+    proofContext: BigInt(resolvedProofContext).toString(),
+    verifierConfigHash: tree.root.toString(),
     defaultClaimKind: ACTION_MINT,
     credentialsByRecipient,
   };
@@ -150,14 +153,13 @@ export function getMintEligibility(bundle, recipient, usedNullifiers = new Set()
   const normalizedRecipient = normalizeAddress(recipient);
   const credentials = getRecipientCredentials(bundle, normalizedRecipient);
   const available = credentials.filter((entry) => {
-    const nullifier = computeNullifier({
+    const identityNullifier = computeIdentityNullifier({
       secret: entry.secret,
-      credentialSlot: entry.credentialSlot,
-      contextId: bundle.contextId,
+      proofContext: bundle.proofContext,
       recipient: BigInt(normalizedRecipient),
       claimKind: ACTION_MINT,
     });
-    return !usedNullifiers.has(nullifier.toString());
+    return !usedNullifiers.has(identityNullifier.toString());
   });
   return {
     eligible: available.length > 0,

@@ -6,11 +6,11 @@ import { ethers } from 'ethers';
 import {
   getRecipientCredentials,
   normalizeAddress,
-} from '../../../shared/proof/eligibilityBundle.mjs';
+} from '../../../shared/proof/credentialBundle.mjs';
 import {
   encodeProofMetadata,
-  computeLeaf,
-  computeNullifier,
+  computeCredentialCommitment,
+  computeIdentityNullifier,
 } from '../../../shared/proof/localStarkProver.mjs';
 
 export interface EligibilityResult {
@@ -19,18 +19,20 @@ export interface EligibilityResult {
 }
 
 export interface EligibilityWitness {
-  eligibilityRoot: string;
-  credentialSlot: string;
-  secret: string;
-  credentialLeaf: string;
-  nullifier: string;
-  siblings: string[];
-  pathIndices: number[];
+  verifierConfigHash: string;
+  credentialSecret: string;
+  credentialCommitment: string;
+  identityNullifier: string;
+  commitmentWitness: {
+    commitmentRoot: string;
+    siblings: string[];
+    pathIndices: number[];
+  };
 }
 
 export interface EligibilityProvider {
-  getEligibility(contextId: string, address: string, claimKind?: number): Promise<EligibilityResult>;
-  selectCredential(contextId: string, address: string, claimKind: number): Promise<EligibilityWitness>;
+  getEligibility(proofContext: string, address: string, claimKind?: number): Promise<EligibilityResult>;
+  selectCredential(proofContext: string, address: string, claimKind: number): Promise<EligibilityWitness>;
 }
 
 export class EligibilityAccessError extends Error {
@@ -45,14 +47,14 @@ export class EligibilityAccessError extends Error {
   }
 }
 
-interface EligibilityBundle {
+interface CredentialBundle {
   schema: string;
-  contextId: string;
-  eligibilityRoot: string;
+  proofContext: string;
+  verifierConfigHash: string;
   credentialsByRecipient: Record<string, Array<{
-    credentialSlot: string;
+    credentialNonce: string;
     secret: string;
-    credentialLeaf: string;
+    credentialCommitment: string;
     index: number;
     siblings: string[];
     pathIndices: number[];
@@ -65,37 +67,38 @@ interface CreateEligibilityProviderOptions {
   isProofReserved?: (proofMetadata: string) => Promise<boolean>;
 }
 
-function normalizeContextId(value: string | number | bigint): string {
+function normalizeProofContext(value: string | number | bigint): string {
   return BigInt(value).toString();
 }
 
-function resolveBundlePath(rawPath: string): string {
+function resolveBundlePath(env: NodeJS.ProcessEnv): string {
+  const rawPath = String(env.CREDENTIAL_BUNDLE_PATH || env.ELIGIBILITY_BUNDLE_PATH || '').trim();
   if (!rawPath) {
-    throw new Error('ELIGIBILITY_BUNDLE_PATH must be set for local proving mode');
+    throw new Error('CREDENTIAL_BUNDLE_PATH must be set for local proving mode');
   }
   return path.isAbsolute(rawPath)
     ? rawPath
     : path.resolve(process.cwd(), rawPath);
 }
 
-function loadBundle(filePath: string): EligibilityBundle {
+function loadBundle(filePath: string): CredentialBundle {
   if (!fs.existsSync(filePath)) {
-    throw new Error(`Eligibility bundle not found: ${filePath}`);
+    throw new Error(`Credential bundle not found: ${filePath}`);
   }
   const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  if (!parsed || parsed.schema !== 'zkphil-eligibility-bundle-v1') {
-    throw new Error(`Unsupported eligibility bundle schema in ${filePath}`);
+  if (!parsed || parsed.schema !== 'zkphil-credential-bundle-v2') {
+    throw new Error(`Unsupported credential bundle schema in ${filePath}`);
   }
-  return parsed as EligibilityBundle;
+  return parsed as CredentialBundle;
 }
 
-class StaticEligibilityBundleProvider implements EligibilityProvider {
-  private readonly bundle: EligibilityBundle;
+class StaticCredentialBundleProvider implements EligibilityProvider {
+  private readonly bundle: CredentialBundle;
   private readonly isNullifierSpent: (nullifier: bigint) => Promise<boolean>;
   private readonly isProofReserved: (proofMetadata: string) => Promise<boolean>;
 
   constructor(
-    bundle: EligibilityBundle,
+    bundle: CredentialBundle,
     isNullifierSpent: (nullifier: bigint) => Promise<boolean>,
     isProofReserved: (proofMetadata: string) => Promise<boolean>
   ) {
@@ -104,38 +107,35 @@ class StaticEligibilityBundleProvider implements EligibilityProvider {
     this.isProofReserved = isProofReserved;
   }
 
-  private assertContext(contextId: string): void {
-    if (normalizeContextId(contextId) !== normalizeContextId(this.bundle.contextId)) {
+  private assertContext(proofContext: string): void {
+    if (normalizeProofContext(proofContext) !== normalizeProofContext(this.bundle.proofContext)) {
       throw new Error(
-        `Eligibility bundle contextId=${this.bundle.contextId} does not match requested contextId=${normalizeContextId(contextId)}`
+        `Credential bundle proofContext=${this.bundle.proofContext} does not match requested proofContext=${normalizeProofContext(proofContext)}`
       );
     }
   }
 
-  async getEligibility(contextId: string, address: string, claimKind: number = 1): Promise<EligibilityResult> {
-    this.assertContext(contextId);
+  async getEligibility(proofContext: string, address: string, claimKind: number = 1): Promise<EligibilityResult> {
+    this.assertContext(proofContext);
     const recipient = normalizeAddress(address);
-    const credentials = getRecipientCredentials(this.bundle, recipient) as EligibilityBundle['credentialsByRecipient'][string];
+    const credentials = getRecipientCredentials(this.bundle, recipient) as CredentialBundle['credentialsByRecipient'][string];
     let remaining = 0;
     for (const entry of credentials) {
-      const nullifier = computeNullifier({
+      const identityNullifier = computeIdentityNullifier({
         secret: entry.secret,
-        credentialSlot: entry.credentialSlot,
-        contextId,
+        proofContext,
         recipient: BigInt(recipient),
         claimKind,
       });
-      const credentialLeaf = computeLeaf({
+      const credentialCommitment = computeCredentialCommitment({
         secret: entry.secret,
         recipient: BigInt(recipient),
-        credentialSlot: entry.credentialSlot,
       });
       const proofMetadata = encodeProofMetadata({
-        nullifier,
-        credentialSlot: entry.credentialSlot,
-        credentialLeaf,
+        identityNullifier,
+        credentialCommitment,
       });
-      if (!(await this.isNullifierSpent(nullifier)) && !(await this.isProofReserved(proofMetadata))) {
+      if (!(await this.isNullifierSpent(identityNullifier)) && !(await this.isProofReserved(proofMetadata))) {
         remaining += 1;
       }
     }
@@ -145,10 +145,10 @@ class StaticEligibilityBundleProvider implements EligibilityProvider {
     };
   }
 
-  async selectCredential(contextId: string, address: string, claimKind: number): Promise<EligibilityWitness> {
-    this.assertContext(contextId);
+  async selectCredential(proofContext: string, address: string, claimKind: number): Promise<EligibilityWitness> {
+    this.assertContext(proofContext);
     const recipient = normalizeAddress(address);
-    const credentials = getRecipientCredentials(this.bundle, recipient) as EligibilityBundle['credentialsByRecipient'][string];
+    const credentials = getRecipientCredentials(this.bundle, recipient) as CredentialBundle['credentialsByRecipient'][string];
     if (credentials.length === 0) {
       throw new EligibilityAccessError(
         'ELIGIBILITY_ADDRESS_NOT_ALLOWED',
@@ -158,35 +158,34 @@ class StaticEligibilityBundleProvider implements EligibilityProvider {
     }
 
     for (const entry of credentials) {
-      const nullifier = computeNullifier({
+      const identityNullifier = computeIdentityNullifier({
         secret: entry.secret,
-        credentialSlot: entry.credentialSlot,
-        contextId,
+        proofContext,
         recipient: BigInt(recipient),
         claimKind,
       });
-      const expectedCredentialLeaf = computeLeaf({
+      const credentialCommitment = computeCredentialCommitment({
         secret: entry.secret,
         recipient: BigInt(recipient),
-        credentialSlot: entry.credentialSlot,
       });
       const proofMetadata = encodeProofMetadata({
-        nullifier,
-        credentialSlot: entry.credentialSlot,
-        credentialLeaf: expectedCredentialLeaf,
+        identityNullifier,
+        credentialCommitment,
       });
-      if (await this.isNullifierSpent(nullifier) || await this.isProofReserved(proofMetadata)) {
+      if (await this.isNullifierSpent(identityNullifier) || await this.isProofReserved(proofMetadata)) {
         continue;
       }
 
       return {
-        eligibilityRoot: this.bundle.eligibilityRoot,
-        credentialSlot: BigInt(entry.credentialSlot).toString(),
-        secret: BigInt(entry.secret).toString(),
-        credentialLeaf: expectedCredentialLeaf.toString(),
-        nullifier: nullifier.toString(),
-        siblings: entry.siblings.map((value) => BigInt(value).toString()),
-        pathIndices: entry.pathIndices.map((value) => Number(value)),
+        verifierConfigHash: this.bundle.verifierConfigHash,
+        credentialSecret: BigInt(entry.secret).toString(),
+        credentialCommitment: credentialCommitment.toString(),
+        identityNullifier: identityNullifier.toString(),
+        commitmentWitness: {
+          commitmentRoot: this.bundle.verifierConfigHash,
+          siblings: entry.siblings.map((value) => BigInt(value).toString()),
+          pathIndices: entry.pathIndices.map((value) => Number(value)),
+        },
       };
     }
 
@@ -202,9 +201,9 @@ export function createEligibilityProvider(
   options: CreateEligibilityProviderOptions
 ): EligibilityProvider {
   const env = options.env || process.env;
-  const bundlePath = resolveBundlePath(String(env.ELIGIBILITY_BUNDLE_PATH || '').trim());
+  const bundlePath = resolveBundlePath(env);
   const bundle = loadBundle(bundlePath);
-  return new StaticEligibilityBundleProvider(
+  return new StaticCredentialBundleProvider(
     bundle,
     options.isNullifierSpent,
     options.isProofReserved || (async () => false)

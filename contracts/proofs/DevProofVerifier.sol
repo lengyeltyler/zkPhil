@@ -13,7 +13,7 @@ import {ISharpFactRegistry} from "./ISharpFactRegistry.sol";
 ///        Mainnet: 0x47312450B3Ac8b5b8e247a6bB6d523e7a9E80E50
 ///        Sepolia: 0x07ec0D28e50322Eb0C159B9090ecF3aeA8346DFe
 ///
-///      Fact format (must match cairo/src/eligibility.cairo outputs):
+///      Fact format (must match cairo/src/credential.cairo outputs):
 ///        fact = keccak256(abi.encode(programHash, outputsHash))
 ///        outputsHash = keccak256(abi.encodePacked(output[0], output[1], ..., output[n]))
 contract DevProofVerifier is ISharpFactRegistry {

@@ -12,7 +12,7 @@ function normalizeAddress(value: string): string {
 
 export function computeMintClaimHash(params: {
   programHash: string;
-  contextId: bigint | string | number;
+  proofContext: bigint | string | number;
   chainId: bigint | string | number;
   proofGateAddress: string;
   recipient: string;
@@ -28,7 +28,7 @@ export function computeMintClaimHash(params: {
       ['bytes32', 'uint256', 'uint256', 'address', 'address', 'address', 'uint8', 'uint8', 'uint8', 'uint32', 'uint256'],
       [
         normalizeBytes32(params.programHash),
-        BigInt(params.contextId),
+        BigInt(params.proofContext),
         BigInt(params.chainId),
         normalizeAddress(params.proofGateAddress),
         normalizeAddress(params.recipient),
@@ -45,7 +45,7 @@ export function computeMintClaimHash(params: {
 
 export function computeActionClaimHash(params: {
   programHash: string;
-  contextId: bigint | string | number;
+  proofContext: bigint | string | number;
   chainId: bigint | string | number;
   proofGateAddress: string;
   recipient: string;
@@ -58,7 +58,7 @@ export function computeActionClaimHash(params: {
       ['bytes32', 'uint256', 'uint256', 'address', 'address', 'uint8', 'bytes32', 'uint256'],
       [
         normalizeBytes32(params.programHash),
-        BigInt(params.contextId),
+        BigInt(params.proofContext),
         BigInt(params.chainId),
         normalizeAddress(params.proofGateAddress),
         normalizeAddress(params.recipient),

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildEligibilityBundle } from '../../shared/proof/eligibilityBundle.mjs';
+import { buildCredentialBundle } from '../../shared/proof/credentialBundle.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
@@ -28,21 +28,21 @@ function normalizeInputEntries(rawEntries, credentialsPerAddress) {
   const entries = [];
   for (const rawEntry of rawEntries) {
     if (typeof rawEntry === 'string') {
-      for (let credentialSlot = 0; credentialSlot < credentialsPerAddress; credentialSlot += 1) {
-        entries.push({ recipient: rawEntry, credentialSlot });
+      for (let credentialNonce = 0; credentialNonce < credentialsPerAddress; credentialNonce += 1) {
+        entries.push({ recipient: rawEntry, credentialNonce });
       }
       continue;
     }
 
     const recipient = rawEntry.recipient || rawEntry.address;
     const count = Number(rawEntry.credentials ?? rawEntry.count ?? credentialsPerAddress);
-    for (let credentialSlot = 0; credentialSlot < count; credentialSlot += 1) {
+    for (let credentialNonce = 0; credentialNonce < count; credentialNonce += 1) {
       entries.push({
         recipient,
-        credentialSlot:
-          rawEntry.credentialSlot != null
-            ? Number(rawEntry.credentialSlot) + credentialSlot
-            : credentialSlot,
+        credentialNonce:
+          rawEntry.credentialNonce != null
+            ? Number(rawEntry.credentialNonce) + credentialNonce
+            : credentialNonce,
         secret: rawEntry.secret,
       });
     }
@@ -54,20 +54,20 @@ async function main() {
   const args = parseArgs(process.argv);
   const inFile = args.in;
   if (!inFile) {
-    throw new Error('Missing required --in <eligibility.json>');
+    throw new Error('Missing required --in <credentials.json>');
   }
 
   const parsed = JSON.parse(fs.readFileSync(path.resolve(inFile), 'utf8'));
   const rawEntries = Array.isArray(parsed) ? parsed : (parsed.entries || []);
   const credentialsPerAddress = Number(args.credentials || parsed.credentialsPerAddress || 1);
-  const contextId = BigInt(args.contextId || parsed.contextId || 13n);
-  const seed = args.seed || parsed.seed || 'zkphil-local-eligibility';
+  const proofContext = BigInt(args.proofContext || args.contextId || parsed.proofContext || parsed.contextId || 13n);
+  const seed = args.seed || parsed.seed || 'zkphil-local-credential';
   const outFile = path.resolve(
-    args.out || path.join(ROOT_DIR, 'artifacts', 'proofs', 'eligibility-bundle.json')
+    args.out || path.join(ROOT_DIR, 'artifacts', 'proofs', 'credential-bundle.json')
   );
 
-  const bundle = buildEligibilityBundle({
-    contextId,
+  const bundle = buildCredentialBundle({
+    proofContext,
     entries: normalizeInputEntries(rawEntries, credentialsPerAddress),
     seed,
   });

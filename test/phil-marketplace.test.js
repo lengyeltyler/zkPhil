@@ -22,6 +22,8 @@ function resolveArtifactName(name) {
       return 'contracts/mocks/MarketplaceReentrantBuyer.sol:MarketplaceReentrantBuyer';
     case 'DevProofVerifier':
       return 'contracts/proofs/DevProofVerifier.sol:DevProofVerifier';
+    case 'FactRegistryHumanityVerifier':
+      return 'contracts/proofs/FactRegistryHumanityVerifier.sol:FactRegistryHumanityVerifier';
     default:
       return `contracts/${name}.sol:${name}`;
   }
@@ -104,6 +106,7 @@ async function buildFixture({ royaltyBps = 369 } = {}) {
   const renderer = await deploy('MockRenderer', deployer);
   const registryArtifact = await hre.artifacts.readArtifact(resolveArtifactName('DevProofVerifier'));
   const gateArtifact = await hre.artifacts.readArtifact(resolveArtifactName('PhilIdentityGate'));
+  const verifierArtifact = await hre.artifacts.readArtifact(resolveArtifactName('FactRegistryHumanityVerifier'));
   const { registry, gate } = await deployFactProofGate({
     signer: deployer,
     deployContract: async (signer, artifact, args = []) => {
@@ -114,9 +117,10 @@ async function buildFixture({ royaltyBps = 369 } = {}) {
     },
     gateArtifact,
     registryArtifact,
+    verifierArtifact,
     programHash: PROGRAM_HASH,
     contextId: CONTEXT_ID,
-    eligibilityRoot: eligibility.bundle.eligibilityRoot,
+    verifierConfigHash: eligibility.bundle.verifierConfigHash,
     initialAuthorizedCaller: deployerAddress,
   });
   const gateAddress = await gate.getAddress();

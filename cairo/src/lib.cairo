@@ -1,19 +1,18 @@
 /// Phil local-claim STARK proof program.
 ///
-/// Outputs nine felts:
-/// [0] eligibility_root
-/// [1] context_id
+/// Outputs eight felts:
+/// [0] verifier_config_hash
+/// [1] proof_context
 /// [2] recipient
 /// [3] claim_hash_hi
 /// [4] claim_hash_lo
-/// [5] nullifier
-/// [6] credential_slot
-/// [7] credential_leaf
-/// [8] claim_kind
+/// [5] identity_nullifier
+/// [6] credential_commitment
+/// [7] claim_kind
 
-pub mod eligibility;
+pub mod credential;
 
-use eligibility::{MerkleProof, verify_eligibility_claim};
+use credential::{CommitmentWitness, verify_credential_claim};
 use core::array::ArrayTrait;
 use core::traits::TryInto;
 
@@ -27,9 +26,6 @@ fn main(input: Array<felt252>) -> Array<felt252> {
     let mut i: usize = 0;
 
     let secret = input_at(@input, i);
-    i += 1;
-
-    let credential_slot = input_at(@input, i);
     i += 1;
 
     let siblings_len_felt = input_at(@input, i);
@@ -54,9 +50,9 @@ fn main(input: Array<felt252>) -> Array<felt252> {
         p_idx += 1;
     };
 
-    let eligibility_root = input_at(@input, i);
+    let commitment_root = input_at(@input, i);
     i += 1;
-    let context_id = input_at(@input, i);
+    let proof_context = input_at(@input, i);
     i += 1;
     let recipient = input_at(@input, i);
     i += 1;
@@ -66,13 +62,12 @@ fn main(input: Array<felt252>) -> Array<felt252> {
     i += 1;
     let claim_kind = input_at(@input, i);
 
-    let proof = MerkleProof { siblings, path_indices };
-    verify_eligibility_claim(
+    let witness = CommitmentWitness { siblings, path_indices };
+    verify_credential_claim(
         secret,
-        credential_slot,
-        proof,
-        eligibility_root,
-        context_id,
+        witness,
+        commitment_root,
+        proof_context,
         recipient,
         claim_hash_hi,
         claim_hash_lo,

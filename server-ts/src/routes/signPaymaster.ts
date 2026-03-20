@@ -71,15 +71,14 @@ function normalizeBytes(value: string): string {
   return ethers.hexlify(value).toLowerCase();
 }
 
-function decodeProofMetadata(value: string): { nullifier: bigint; credentialSlot: bigint; credentialLeaf: bigint } {
-  const [nullifier, credentialSlot, credentialLeaf] = ethers.AbiCoder.defaultAbiCoder().decode(
-    ['uint256', 'uint256', 'uint256'],
+function decodeProofMetadata(value: string): { identityNullifier: bigint; credentialCommitment: bigint } {
+  const [identityNullifier, credentialCommitment] = ethers.AbiCoder.defaultAbiCoder().decode(
+    ['uint256', 'uint256'],
     value
   );
   return {
-    nullifier: BigInt(nullifier),
-    credentialSlot: BigInt(credentialSlot),
-    credentialLeaf: BigInt(credentialLeaf),
+    identityNullifier: BigInt(identityNullifier),
+    credentialCommitment: BigInt(credentialCommitment),
   };
 }
 
@@ -133,9 +132,9 @@ export default async function signPaymasterRoute(
     gateAddress,
     [
       'function PROGRAM_HASH() view returns (bytes32)',
-      'function CONTEXT_ID() view returns (uint256)',
+      'function PROOF_CONTEXT() view returns (uint256)',
       'function isNullifierSpent(uint256 nullifier) view returns (bool)',
-      'function computeExpectedFactHash(address recipient, bytes32 claimHash, uint256 nullifier, uint256 credentialSlot, uint256 credentialLeaf, uint8 claimKind) view returns (bytes32)',
+      'function computeExpectedFactHash(address recipient, bytes32 claimHash, uint256 identityNullifier, uint256 credentialCommitment, uint8 claimKind) view returns (bytes32)',
     ],
     config.provider
   );
@@ -264,7 +263,7 @@ export default async function signPaymasterRoute(
         };
 
         const gateProgramHash = normalizeBytes32(String(await proofGate.PROGRAM_HASH()));
-        const gateContextId = BigInt((await proofGate.CONTEXT_ID()).toString());
+        const gateProofContext = BigInt((await proofGate.PROOF_CONTEXT()).toString());
 
         const senderCode = await config.provider.getCode(sender);
         const senderExists = senderCode !== '0x';
@@ -364,7 +363,7 @@ export default async function signPaymasterRoute(
           );
           const createClaimHash = computeActionClaimHash({
             programHash: gateProgramHash,
-            contextId: gateContextId,
+            proofContext: gateProofContext,
             chainId: BigInt(chainId),
             proofGateAddress: gateAddress,
             recipient: initOwner,
@@ -372,7 +371,7 @@ export default async function signPaymasterRoute(
             actionHash: createActionHash,
             expiry: createProofExpiry,
           });
-          let createProofMetadata: { nullifier: bigint; credentialSlot: bigint; credentialLeaf: bigint };
+          let createProofMetadata: { identityNullifier: bigint; credentialCommitment: bigint };
           try {
             createProofMetadata = decodeProofMetadata(createProofSignature);
           } catch {
@@ -387,9 +386,8 @@ export default async function signPaymasterRoute(
             String(await proofGate.computeExpectedFactHash(
               initOwner,
               createClaimHash,
-              createProofMetadata.nullifier,
-              createProofMetadata.credentialSlot,
-              createProofMetadata.credentialLeaf,
+              createProofMetadata.identityNullifier,
+              createProofMetadata.credentialCommitment,
               ACTION_ACCOUNT_CREATE
             ))
           );
@@ -402,7 +400,7 @@ export default async function signPaymasterRoute(
           }
 
           const createProofUsed = Boolean(
-            await proofGate.isNullifierSpent(createProofMetadata.nullifier)
+            await proofGate.isNullifierSpent(createProofMetadata.identityNullifier)
           );
           if (createProofUsed) {
             return reply.status(409).send({
@@ -520,7 +518,7 @@ export default async function signPaymasterRoute(
           });
         }
 
-        let mintProofMetadata: { nullifier: bigint; credentialSlot: bigint; credentialLeaf: bigint };
+        let mintProofMetadata: { identityNullifier: bigint; credentialCommitment: bigint };
         try {
           mintProofMetadata = decodeProofMetadata(proofSignature);
         } catch {
@@ -536,7 +534,7 @@ export default async function signPaymasterRoute(
             ['bytes32', 'uint256', 'uint256', 'address', 'address', 'address', 'uint8', 'uint8', 'uint8', 'uint32', 'uint256'],
             [
               gateProgramHash,
-              gateContextId,
+              gateProofContext,
               BigInt(chainId),
               gateAddress,
               proofRecord.recipient,
@@ -553,9 +551,8 @@ export default async function signPaymasterRoute(
           String(await proofGate.computeExpectedFactHash(
             proofRecord.recipient,
             expectedMintClaimHash,
-            mintProofMetadata.nullifier,
-            mintProofMetadata.credentialSlot,
-            mintProofMetadata.credentialLeaf,
+            mintProofMetadata.identityNullifier,
+            mintProofMetadata.credentialCommitment,
             1
           ))
         );
@@ -568,7 +565,7 @@ export default async function signPaymasterRoute(
         }
 
         const mintProofUsed = Boolean(
-          await proofGate.isNullifierSpent(mintProofMetadata.nullifier)
+          await proofGate.isNullifierSpent(mintProofMetadata.identityNullifier)
         );
         if (mintProofUsed) {
           db.markIssuedMintProofUsed(proofRecord.proofId, now);

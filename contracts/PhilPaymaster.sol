@@ -6,7 +6,7 @@ import {Ownable} from "solady/src/auth/Ownable.sol";
 import {IProofGate} from "./IProofGate.sol";
 
 /// @title PhilPaymaster
-/// @notice ERC-4337 v0.7.0 Verifying Paymaster for sponsoring Phil NFT mints
+/// @notice ERC-4337 v0.7.0 verifying paymaster for sponsoring Phil identity issuance
 /// @dev Validates a backend-signed sponsorship approval per UserOp.
 ///      Only sponsors calls to the PhilIdentityMint contract.
 ///
@@ -229,7 +229,7 @@ contract PhilPaymaster is Ownable {
         if (recipient == address(0)) return 7;
         if (mintTo != userOp.sender) return 8;
         if (proof.factHash == bytes32(0)) return 9;
-        if (proof.signature.length != 96) return 10;
+        if (proof.signature.length != 64) return 10;
         if (proof.expiry != 0 && proof.expiry < block.timestamp) return 11;
 
         return 0;

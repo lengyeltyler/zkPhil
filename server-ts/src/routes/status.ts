@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 
 export interface StatusRouteConfig {
-  contextId: bigint;
+  proofContext: bigint;
   programHash: string;
   backendChainId: number;
   backendFactory: string;
@@ -13,7 +13,7 @@ export interface StatusRouteConfig {
 
 interface StatusResponse {
   status: 'ok';
-  contextId: string;
+  proofContext: string;
   programHash: string;
   backendChainId: number;
   backendFactory: string;
@@ -28,7 +28,7 @@ export default async function statusRoute(
   config: StatusRouteConfig
 ) {
   const {
-    contextId,
+    proofContext,
     programHash,
     backendChainId,
     backendFactory,
@@ -41,7 +41,7 @@ export default async function statusRoute(
   fastify.get('/status', async (): Promise<StatusResponse> => {
     return {
       status: 'ok',
-      contextId: `0x${contextId.toString(16).padStart(64, '0')}`,
+      proofContext: `0x${proofContext.toString(16).padStart(64, '0')}`,
       programHash,
       backendChainId,
       backendFactory,

@@ -45,12 +45,11 @@ function relOrAbsPath(filePath) {
 
 function buildScarbArguments(input) {
   return prepareScarbInput({
-    secret: BigInt(input.secret),
-    credentialSlot: BigInt(input.credentialSlot),
-    siblings: input.siblings.map((value) => BigInt(value)),
-    pathIndices: input.pathIndices.map((value) => Number(value)),
-    eligibilityRoot: BigInt(input.eligibilityRoot),
-    contextId: BigInt(input.contextId),
+    secret: BigInt(input.credentialSecret),
+    siblings: input.commitmentWitness.siblings.map((value) => BigInt(value)),
+    pathIndices: input.commitmentWitness.pathIndices.map((value) => Number(value)),
+    commitmentRoot: BigInt(input.commitmentWitness.commitmentRoot),
+    proofContext: BigInt(input.proofContext),
     recipient: BigInt(input.recipient),
     claimHash: input.claimHash,
     claimKind: Number(input.claimKind),
@@ -135,13 +134,12 @@ export async function generateLocalProofArtifact(options) {
   const scarbArgs = buildScarbArguments(request);
   const proofPayload = buildProofPayload({
     programHash: request.programHash,
-    contextId: BigInt(request.contextId),
+    proofContext: BigInt(request.proofContext),
     recipient: request.recipient,
     claimHash: request.claimHash,
     claimKind: Number(request.claimKind),
-    eligibilityRoot: BigInt(request.eligibilityRoot),
-    secret: BigInt(request.secret),
-    credentialSlot: BigInt(request.credentialSlot),
+    verifierConfigHash: BigInt(request.verifierConfigHash),
+    secret: BigInt(request.credentialSecret),
     expiry: BigInt(request.expiry),
   });
 
@@ -188,7 +186,8 @@ export async function generateLocalProofArtifact(options) {
   }
 
   const artifact = {
-    schema: 'zkphil-stwo-proof-artifact-v1',
+    schema: 'zkphil-stwo-proof-artifact-v2',
+    provider: request.provider,
     generatedAt: new Date().toISOString(),
     kind: request.kind === 'action' ? 'action' : 'mint',
     provingMode: 'scarb-stwo',

@@ -23,14 +23,12 @@ interface IPhilIdentityMintConfig {
 
 interface IProofGateConfig {
     function PROGRAM_HASH() external view returns (bytes32);
-    function CONTEXT_ID() external view returns (uint256);
-    function eligibilityRoot() external view returns (uint256);
+    function PROOF_CONTEXT() external view returns (uint256);
     function computeExpectedFactHash(
         address recipient,
         bytes32 claimHash,
-        uint256 nullifier,
-        uint256 credentialSlot,
-        uint256 credentialLeaf,
+        uint256 identityNullifier,
+        uint256 credentialCommitment,
         uint8 claimKind
     ) external view returns (bytes32);
 }
@@ -70,7 +68,7 @@ contract PhilAccount is ERC4337 {
 
     address public unlockInbox;
     address public philIdentityMint;
-    // Legacy proof-verifier slot kept for storage compatibility; local eligibility mode leaves this unset.
+    // Legacy proof-verifier slot kept for storage compatibility; local humanity-verifier mode leaves this unset.
     address public proofVerifier;
     uint64 public lastExecutionApprovalNonce;
     uint32 public starkScopeMask;
@@ -388,21 +386,21 @@ contract PhilAccount is ERC4337 {
         if (gate == address(0)) return false;
 
         bytes32 programHash;
-        uint256 contextId;
+        uint256 proofContext;
         try IProofGateConfig(gate).PROGRAM_HASH() returns (bytes32 value) {
             programHash = value;
         } catch {
             return false;
         }
-        try IProofGateConfig(gate).CONTEXT_ID() returns (uint256 value) {
-            contextId = value;
+        try IProofGateConfig(gate).PROOF_CONTEXT() returns (uint256 value) {
+            proofContext = value;
         } catch {
             return false;
         }
         bytes32 claimHash = keccak256(
             abi.encode(
                 programHash,
-                contextId,
+                proofContext,
                 block.chainid,
                 gate,
                 recipient,
@@ -414,20 +412,19 @@ contract PhilAccount is ERC4337 {
                 proof.expiry
             )
         );
-        if (proof.signature.length != 96) return false;
+        if (proof.signature.length != 64) return false;
 
-        (uint256 nullifier, uint256 credentialSlot, uint256 credentialLeaf) = abi.decode(
+        (uint256 identityNullifier, uint256 credentialCommitment) = abi.decode(
             proof.signature,
-            (uint256, uint256, uint256)
+            (uint256, uint256)
         );
 
         bytes32 expectedFactHash;
         try IProofGateConfig(gate).computeExpectedFactHash(
             recipient,
             claimHash,
-            nullifier,
-            credentialSlot,
-            credentialLeaf,
+            identityNullifier,
+            credentialCommitment,
             1
         ) returns (bytes32 value) {
             expectedFactHash = value;

@@ -1,58 +1,57 @@
 # zkPhil
 
-zkPhil keeps Phil Ethereum-native and uses local Cairo + S-two proving for eligibility-based identity issuance.
+zkPhil stays Ethereum-native and uses local Cairo + S-two proving for Phil identity issuance.
 
-The trusted backend signer flow has been removed from identity authorization. The backend now prepares recipient-bound eligibility payloads, the user device runs Cairo locally, and Solidity accepts only fact-registry-backed eligibility claims for the expected Phil identity issuance.
+The active architecture is now humanity-ready:
 
-Code is licensed under [MIT](./LICENSE). SVG artwork in [`zkPhilLayers/`](./zkPhilLayers) is released under [CC0 1.0](./LICENSE-ARTWORK).
+- `PhilIdentityGate` is the identity/nullifier gate.
+- `FactRegistryHumanityVerifier` is the current proof bridge implementation.
+- the current local provider is a credential-commitment bundle proved locally in Cairo
+- future proof-of-human providers such as World can plug in behind the humanity-verifier abstraction
+- no backend signer authorizes minting anymore
 
-## Eligibility flow
+World or any other third-party proof-of-human provider is not implemented in this repo yet.
 
-1. `POST /request-mint` returns a `provingRequest` with the recipient-bound witness bundle, claim hash, expected fact hash, and expected proof metadata.
-2. The local prover service in [`scripts/proofs/local_prover_server.mjs`](./scripts/proofs/local_prover_server.mjs) runs `scarb execute` / `scarb prove` against [`cairo/`](./cairo).
-3. The client submits the resulting proof payload to `POST /register-proof`.
-4. [`contracts/PhilIdentityGate.sol`](./contracts/PhilIdentityGate.sol) consumes only fact-registry-backed proofs. Backend ECDSA signatures are no longer accepted.
+## Identity flow
 
-This keeps the product Ethereum-native while making the proving layer generic enough for:
+1. `POST /request-mint` returns a recipient-bound `provingRequest`.
+2. The browser sends that request to the local prover at [`scripts/proofs/local_prover_server.mjs`](./scripts/proofs/local_prover_server.mjs).
+3. Cairo runs locally and emits an S-two proof artifact plus the contract proof payload.
+4. The client sends the proof payload to `POST /register-proof`.
+5. [`contracts/PhilIdentityGate.sol`](./contracts/PhilIdentityGate.sol) accepts only fact-registry-backed proofs and consumes the identity nullifier.
 
-- static eligibility lists
-- future proof-of-human credentials
-- other credential roots that can be expressed as Cairo eligibility programs
+## Current verifier model
 
-Production note:
-- This repo does not implement direct onchain S-two verification.
-- Production chains must use a fact registry bridge.
-- Local chain `31337` uses [`contracts/proofs/DevProofVerifier.sol`](./contracts/proofs/DevProofVerifier.sol) as a dev-only registry.
+- [`contracts/IHumanityVerifier.sol`](./contracts/IHumanityVerifier.sol) defines the provider-agnostic verifier abstraction.
+- [`contracts/proofs/FactRegistryHumanityVerifier.sol`](./contracts/proofs/FactRegistryHumanityVerifier.sol) is the current implementation.
+- [`cairo/src/credential.cairo`](./cairo/src/credential.cairo) proves a recipient-bound credential commitment against the current verifier config hash.
+- the verifier config hash is currently a Merkle commitment root for the local credential bundle, but that is an implementation detail, not the product model
 
 ## Local proving commands
 
-Build an eligibility bundle:
+Build a credential bundle:
 
 ```bash
-node scripts/proofs/build_eligibility_bundle.mjs \
-  --in eligibility.json \
-  --out artifacts/proofs/eligibility-bundle.json \
-  --contextId 13
+node scripts/proofs/build_credential_bundle.mjs \
+  --in credentials.json \
+  --out artifacts/proofs/credential-bundle.json \
+  --proofContext 13
 ```
 
-Run the local prover service for the browser/frontend:
+Run the local prover service:
 
 ```bash
 node scripts/proofs/local_prover_server.mjs
 ```
 
-Generate one proof artifact from a saved request:
+Generate and optionally verify one proof artifact:
 
 ```bash
 node scripts/proofs/prove_local.mjs \
   --request artifacts/proofs/request.json \
   --out artifacts/proofs/local-proof-artifact.json \
   --prove
-```
 
-Optional local verification:
-
-```bash
 node scripts/proofs/prove_local.mjs \
   --request artifacts/proofs/request.json \
   --out artifacts/proofs/local-proof-artifact.json \
@@ -73,15 +72,15 @@ Minimum local-proving env:
 - `CHAIN_ID`
 - `PRIVATE_KEY`
 - `PROGRAM_HASH`
-- `CONTEXT_ID`
-- `ELIGIBILITY_BUNDLE_PATH`
+- `PROOF_CONTEXT`
+- `CREDENTIAL_BUNDLE_PATH`
 - `PAYMASTER_SIGNER_KEY`
 
-If you are running on local `31337`, also set:
+Local `31337` also needs:
 
 - `FACT_REGISTRY_OPERATOR_KEY`
 
-If you are targeting Sepolia/public chains, set:
+Public chains also need:
 
 - `FACT_REGISTRY`
 
@@ -89,9 +88,11 @@ If you are targeting Sepolia/public chains, set:
 
 ```bash
 npm run compile
+scarb --manifest-path cairo/Scarb.toml test
+cd server-ts && npx vitest --run
 npm run test:node
 npm run test:hardhat
-cd server-ts && npm test
+npm run test:legacy
 npm run proofs:build-bundle
 npm run proofs:prove-server
 ```
@@ -99,6 +100,7 @@ npm run proofs:prove-server
 ## Key docs
 
 - Architecture: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
-- Review packet: [`REVIEW_PACKET.md`](./REVIEW_PACKET.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)
 - Refactor summary: [`REFRACTOR_SUMMARY.md`](./REFRACTOR_SUMMARY.md)
+- Humanity-ready summary: [`HUMANITY_READY_SUMMARY.md`](./HUMANITY_READY_SUMMARY.md)
+- Review packet: [`REVIEW_PACKET.md`](./REVIEW_PACKET.md)

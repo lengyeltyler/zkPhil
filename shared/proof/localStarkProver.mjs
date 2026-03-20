@@ -5,11 +5,31 @@ export const ACTION_MINT = 1;
 export const ACTION_ACCOUNT_CREATE = 2;
 export const ACTION_CADENCE_MINT = 4;
 export const ACTION_CADENCE_RESERVE = 5;
-export const DOMAIN_LEAF = 1n;
-export const DOMAIN_NULL = 2n;
+export const DOMAIN_COMMITMENT = 1n;
+export const DOMAIN_NULLIFIER = 2n;
 
 function pedersen(a, b) {
   return BigInt(hash.computePedersenHash(a.toString(), b.toString()));
+}
+
+function resolveProofContext(params) {
+  if (params.proofContext != null) {
+    return params.proofContext;
+  }
+  if (params.contextId != null) {
+    return params.contextId;
+  }
+  throw new Error('proofContext is required');
+}
+
+function resolveVerifierConfigHash(params) {
+  if (params.verifierConfigHash != null) {
+    return params.verifierConfigHash;
+  }
+  if (params.eligibilityRoot != null) {
+    return params.eligibilityRoot;
+  }
+  throw new Error('verifierConfigHash is required');
 }
 
 function resolveProofDomain({ chainId, proofGateAddress, proofGate }) {
@@ -29,6 +49,7 @@ function resolveProofDomain({ chainId, proofGateAddress, proofGate }) {
 }
 
 export function computeClaimHash({
+  proofContext,
   contextId,
   programHash,
   chainId,
@@ -42,13 +63,14 @@ export function computeClaimHash({
   mixSeed = 0,
   expiry,
 }) {
+  const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const domain = resolveProofDomain({ chainId, proofGateAddress, proofGate });
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       ['bytes32', 'uint256', 'uint256', 'address', 'address', 'address', 'uint8', 'uint8', 'uint8', 'uint32', 'uint256'],
       [
         ethers.zeroPadValue(programHash, 32),
-        BigInt(contextId),
+        BigInt(resolvedProofContext),
         domain.chainId,
         domain.proofGateAddress,
         ethers.getAddress(recipient),
@@ -64,6 +86,7 @@ export function computeClaimHash({
 }
 
 export function computeActionClaimHash({
+  proofContext,
   contextId,
   programHash,
   chainId,
@@ -74,13 +97,14 @@ export function computeActionClaimHash({
   actionHash,
   expiry,
 }) {
+  const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const domain = resolveProofDomain({ chainId, proofGateAddress, proofGate });
   return ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       ['bytes32', 'uint256', 'uint256', 'address', 'address', 'uint8', 'bytes32', 'uint256'],
       [
         ethers.zeroPadValue(programHash, 32),
-        BigInt(contextId),
+        BigInt(resolvedProofContext),
         domain.chainId,
         domain.proofGateAddress,
         ethers.getAddress(recipient),
@@ -100,79 +124,73 @@ export function splitClaimHash(claimHash) {
   };
 }
 
-export function computeLeaf({
+export function computeCredentialCommitment({
   secret,
   recipient,
-  credentialSlot,
 }) {
   return pedersen(
-    DOMAIN_LEAF,
-    pedersen(BigInt(secret), pedersen(BigInt(recipient), BigInt(credentialSlot)))
+    DOMAIN_COMMITMENT,
+    pedersen(BigInt(secret), BigInt(recipient))
   );
 }
 
-export function computeNullifier({
+export function computeIdentityNullifier({
   secret,
-  credentialSlot,
-  contextId,
+  proofContext,
   recipient,
   claimKind,
 }) {
   return pedersen(
-    DOMAIN_NULL,
+    DOMAIN_NULLIFIER,
     pedersen(
       BigInt(secret),
       pedersen(
         BigInt(claimKind),
-        pedersen(BigInt(credentialSlot), pedersen(BigInt(contextId), BigInt(recipient)))
+        pedersen(BigInt(proofContext), BigInt(recipient))
       )
     )
   );
 }
 
 export function encodeProofMetadata({
-  nullifier,
-  credentialSlot,
-  credentialLeaf,
+  identityNullifier,
+  credentialCommitment,
 }) {
   return ethers.AbiCoder.defaultAbiCoder().encode(
-    ['uint256', 'uint256', 'uint256'],
-    [BigInt(nullifier), BigInt(credentialSlot), BigInt(credentialLeaf)]
+    ['uint256', 'uint256'],
+    [BigInt(identityNullifier), BigInt(credentialCommitment)]
   );
 }
 
 export function decodeProofMetadata(encoded) {
-  const [nullifier, credentialSlot, credentialLeaf] = ethers.AbiCoder.defaultAbiCoder().decode(
-    ['uint256', 'uint256', 'uint256'],
+  const [identityNullifier, credentialCommitment] = ethers.AbiCoder.defaultAbiCoder().decode(
+    ['uint256', 'uint256'],
     encoded
   );
   return {
-    nullifier: BigInt(nullifier),
-    credentialSlot: BigInt(credentialSlot),
-    credentialLeaf: BigInt(credentialLeaf),
+    identityNullifier: BigInt(identityNullifier),
+    credentialCommitment: BigInt(credentialCommitment),
   };
 }
 
 export function buildFactOutputs({
-  eligibilityRoot,
-  contextId,
+  verifierConfigHash,
+  proofContext,
   recipient,
   claimHash,
-  nullifier,
-  credentialSlot,
-  credentialLeaf,
+  identityNullifier,
+  credentialCommitment,
   claimKind,
 }) {
   const split = splitClaimHash(claimHash);
   return [
-    BigInt(eligibilityRoot),
-    BigInt(contextId),
+    BigInt(verifierConfigHash),
+    BigInt(proofContext),
     BigInt(recipient),
     split.hi,
     split.lo,
-    BigInt(nullifier),
-    BigInt(credentialSlot),
-    BigInt(credentialLeaf),
+    BigInt(identityNullifier),
+    BigInt(credentialCommitment),
     BigInt(claimKind),
   ];
 }
@@ -217,36 +235,36 @@ export function computeMintActionHash({
 
 export function buildProofPayload({
   programHash,
+  proofContext,
   contextId,
   recipient,
   claimHash,
   claimKind,
+  verifierConfigHash,
   eligibilityRoot,
   secret,
-  credentialSlot,
   expiry,
 }) {
+  const resolvedProofContext = resolveProofContext({ proofContext, contextId });
+  const resolvedVerifierConfigHash = resolveVerifierConfigHash({ verifierConfigHash, eligibilityRoot });
   const normalizedRecipient = BigInt(ethers.getAddress(recipient));
-  const credentialLeaf = computeLeaf({
+  const credentialCommitment = computeCredentialCommitment({
     secret,
     recipient: normalizedRecipient,
-    credentialSlot,
   });
-  const nullifier = computeNullifier({
+  const identityNullifier = computeIdentityNullifier({
     secret,
-    credentialSlot,
-    contextId,
+    proofContext: resolvedProofContext,
     recipient: normalizedRecipient,
     claimKind,
   });
   const outputs = buildFactOutputs({
-    eligibilityRoot,
-    contextId,
+    verifierConfigHash: resolvedVerifierConfigHash,
+    proofContext: resolvedProofContext,
     recipient: normalizedRecipient,
     claimHash,
-    nullifier,
-    credentialSlot,
-    credentialLeaf,
+    identityNullifier,
+    credentialCommitment,
     claimKind,
   });
   const factHash = computeFactHash({
@@ -257,19 +275,18 @@ export function buildProofPayload({
   return {
     expiry: BigInt(expiry),
     factHash,
-    signature: encodeProofMetadata({ nullifier, credentialSlot, credentialLeaf }),
+    signature: encodeProofMetadata({ identityNullifier, credentialCommitment }),
     claimHash,
     claimKind,
     outputs,
     publicOutputs: {
-      eligibilityRoot: BigInt(eligibilityRoot),
-      contextId: BigInt(contextId),
+      verifierConfigHash: BigInt(resolvedVerifierConfigHash),
+      proofContext: BigInt(resolvedProofContext),
       recipient: normalizedRecipient,
       claimHashHi: outputs[3],
       claimHashLo: outputs[4],
-      nullifier,
-      credentialSlot: BigInt(credentialSlot),
-      credentialLeaf,
+      identityNullifier,
+      credentialCommitment,
       claimKind: BigInt(claimKind),
     },
   };
@@ -277,6 +294,7 @@ export function buildProofPayload({
 
 export async function generateLocalMintProof({
   programHash,
+  proofContext,
   contextId,
   chainId,
   proofGateAddress,
@@ -288,13 +306,15 @@ export async function generateLocalMintProof({
   mixMode = 0,
   mixSeed = 0,
   expiry,
+  verifierConfigHash,
   eligibilityRoot,
   secret,
-  credentialSlot = 0,
 }) {
+  const resolvedProofContext = resolveProofContext({ proofContext, contextId });
+  const resolvedVerifierConfigHash = resolveVerifierConfigHash({ verifierConfigHash, eligibilityRoot });
   const claimHash = computeClaimHash({
     programHash,
-    contextId,
+    proofContext: resolvedProofContext,
     chainId,
     proofGateAddress,
     proofGate,
@@ -309,19 +329,19 @@ export async function generateLocalMintProof({
 
   return buildProofPayload({
     programHash,
-    contextId,
+    proofContext: resolvedProofContext,
     recipient,
     claimHash,
     claimKind: ACTION_MINT,
-    eligibilityRoot,
+    verifierConfigHash: resolvedVerifierConfigHash,
     secret,
-    credentialSlot,
     expiry,
   });
 }
 
 export async function generateLocalActionProof({
   programHash,
+  proofContext,
   contextId,
   chainId,
   proofGateAddress,
@@ -330,13 +350,15 @@ export async function generateLocalActionProof({
   actionType,
   actionHash,
   expiry,
+  verifierConfigHash,
   eligibilityRoot,
   secret,
-  credentialSlot = 0,
 }) {
+  const resolvedProofContext = resolveProofContext({ proofContext, contextId });
+  const resolvedVerifierConfigHash = resolveVerifierConfigHash({ verifierConfigHash, eligibilityRoot });
   const claimHash = computeActionClaimHash({
     programHash,
-    contextId,
+    proofContext: resolvedProofContext,
     chainId,
     proofGateAddress,
     proofGate,
@@ -348,38 +370,42 @@ export async function generateLocalActionProof({
 
   return buildProofPayload({
     programHash,
-    contextId,
+    proofContext: resolvedProofContext,
     recipient,
     claimHash,
     claimKind: actionType,
-    eligibilityRoot,
+    verifierConfigHash: resolvedVerifierConfigHash,
     secret,
-    credentialSlot,
     expiry,
   });
 }
 
 export function prepareScarbInput({
   secret,
-  credentialSlot,
   siblings,
   pathIndices,
+  commitmentRoot,
   eligibilityRoot,
+  proofContext,
   contextId,
   recipient,
   claimHash,
   claimKind,
 }) {
+  const resolvedCommitmentRoot = resolveVerifierConfigHash({
+    verifierConfigHash: commitmentRoot,
+    eligibilityRoot,
+  });
+  const resolvedProofContext = resolveProofContext({ proofContext, contextId });
   const split = splitClaimHash(claimHash);
   return [
     BigInt(secret),
-    BigInt(credentialSlot),
     BigInt(siblings.length),
     ...siblings.map((value) => BigInt(value)),
     BigInt(pathIndices.length),
     ...pathIndices.map((value) => BigInt(value)),
-    BigInt(eligibilityRoot),
-    BigInt(contextId),
+    BigInt(resolvedCommitmentRoot),
+    BigInt(resolvedProofContext),
     BigInt(recipient),
     split.hi,
     split.lo,

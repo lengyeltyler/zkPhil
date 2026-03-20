@@ -22,6 +22,7 @@ const LEGACY_FACTORY_SELECTOR = '0xf43df9b6';
 const ARTIFACT_FQNS = {
   MockRenderer: 'contracts/mocks/MockRenderer.sol:MockRenderer',
   DevProofVerifier: 'contracts/proofs/DevProofVerifier.sol:DevProofVerifier',
+  FactRegistryHumanityVerifier: 'contracts/proofs/FactRegistryHumanityVerifier.sol:FactRegistryHumanityVerifier',
   PhilIdentityGate: 'contracts/PhilIdentityGate.sol:PhilIdentityGate',
   PhilIdentityMint: 'contracts/PhilIdentityMint.sol:PhilIdentityMint',
   MockStarknetCore: 'contracts/mocks/MockStarknetCore.sol:MockStarknetCore',
@@ -73,6 +74,7 @@ async function buildFixture() {
   const renderer = await deploy('MockRenderer', deployer);
   const registryArtifact = await hre.artifacts.readArtifact(ARTIFACT_FQNS.DevProofVerifier);
   const gateArtifact = await hre.artifacts.readArtifact(ARTIFACT_FQNS.PhilIdentityGate);
+  const verifierArtifact = await hre.artifacts.readArtifact('contracts/proofs/FactRegistryHumanityVerifier.sol:FactRegistryHumanityVerifier');
   const { registry, gate } = await deployFactProofGate({
     signer: deployer,
     deployContract: async (signer, artifact, args = []) => {
@@ -83,9 +85,10 @@ async function buildFixture() {
     },
     gateArtifact,
     registryArtifact,
+    verifierArtifact,
     programHash: PROGRAM_HASH,
     contextId: CONTEXT_ID,
-    eligibilityRoot: eligibility.bundle.eligibilityRoot,
+    verifierConfigHash: eligibility.bundle.verifierConfigHash,
     initialAuthorizedCaller: deployerAddress,
   });
   const mint = await deploy('PhilIdentityMint', deployer, [

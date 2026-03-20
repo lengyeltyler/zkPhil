@@ -1,7 +1,7 @@
 /**
  * Phil Eligibility Proof Server
  *
- * Server for preparing local eligibility proving requests for Phil identity issuance.
+ * Server for preparing local identity proving requests for Phil issuance.
  */
 
 import Fastify from 'fastify';
@@ -75,7 +75,7 @@ function resolveWritablePath(rawPath: string): string {
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
-const CONTEXT_ID_RAW = process.env.CONTEXT_ID || '13';
+const PROOF_CONTEXT_RAW = process.env.PROOF_CONTEXT || process.env.CONTEXT_ID || '13';
 const DATABASE_PATH = resolveWritablePath(process.env.DATABASE_PATH || './server-ts/data/phil_identity.db');
 const PROGRAM_HASH = process.env.PROGRAM_HASH || '';
 const CHAIN_ID_RAW = process.env.CHAIN_ID || '';
@@ -239,7 +239,7 @@ async function main() {
     process.exit(1);
   }
 
-  const CONTEXT_ID = BigInt(CONTEXT_ID_RAW);
+  const PROOF_CONTEXT = BigInt(PROOF_CONTEXT_RAW);
   const aaDeployment = readDeployment(`4337_${CHAIN_ID}.json`);
   const starkDeployment = readDeployment(`stark_${CHAIN_ID}.json`);
   const PHIL_ACCOUNT_FACTORY = process.env.PHIL_ACCOUNT_FACTORY || aaDeployment?.PhilAccountFactory || '';
@@ -477,7 +477,7 @@ async function main() {
   fastify.log.info(`Database initialized at ${DATABASE_PATH}`);
 
   await fastify.register(statusRoute, {
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     programHash: PROGRAM_HASH,
     backendChainId: providerChainId,
     backendFactory: PHIL_ACCOUNT_FACTORY,
@@ -489,13 +489,13 @@ async function main() {
 
   await fastify.register(authRoute, {
     db,
-    contextId: `0x${CONTEXT_ID.toString(16).padStart(64, '0')}`,
+    proofContext: `0x${PROOF_CONTEXT.toString(16).padStart(64, '0')}`,
     chainId: providerChainId,
     proofGateAddress: PROOF_GATE_ADDRESS,
   });
 
   await fastify.register(requestMintRoute, {
-    contextId: CONTEXT_ID.toString(),
+    proofContext: PROOF_CONTEXT.toString(),
     programHash: PROGRAM_HASH,
     chainId: providerChainId,
     proofGateAddress: PROOF_GATE_ADDRESS,
@@ -550,7 +550,7 @@ async function main() {
     console.log('PHIL ELIGIBILITY PROOF SERVER');
     console.log('='.repeat(60));
     console.log(`Server running on http://${HOST}:${PORT}`);
-    console.log(`Context ID: ${CONTEXT_ID}`);
+    console.log(`Proof Context: ${PROOF_CONTEXT}`);
     console.log(`Chain ID: ${CHAIN_ID}`);
     console.log(`Backend Network: ${backendNetwork}`);
     console.log(`Program Hash: ${PROGRAM_HASH}`);
@@ -570,7 +570,7 @@ async function main() {
     console.log('\nEndpoints:');
     console.log('  GET  /health         - Health check');
     console.log('  GET  /status         - Server status');
-    console.log('  GET  /eligibility    - Check remaining local-proof slots');
+    console.log('  GET  /eligibility    - Check identity eligibility availability');
     console.log('  POST /auth/challenge - Build recipient auth challenge');
     console.log('  POST /auth/verify    - Verify recipient auth challenge');
     console.log('  POST /request-mint   - Request local proving inputs');

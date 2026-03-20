@@ -94,7 +94,7 @@ test('error cases: mint input validation, gate restrictions, and supply cap', as
 
     const deployerAddress = await deployer.getAddress();
     const nonce = await provider.getTransactionCount(deployerAddress);
-    const expectedMint = ethers.getCreateAddress({ from: deployerAddress, nonce: nonce + 2 });
+    const expectedMint = ethers.getCreateAddress({ from: deployerAddress, nonce: nonce + 3 });
 
     const gateArtifact = getArtifact(artifacts, 'PhilIdentityGate');
     const mintArtifact = getArtifact(artifacts, 'PhilIdentityMint');
@@ -103,9 +103,10 @@ test('error cases: mint input validation, gate restrictions, and supply cap', as
       deployContract,
       gateArtifact,
       registryArtifact: getArtifact(artifacts, 'DevProofVerifier'),
+      verifierArtifact: getArtifact(artifacts, 'FactRegistryHumanityVerifier'),
       programHash: PROGRAM_HASH,
       contextId: CONTEXT_ID,
-      eligibilityRoot: eligibility.bundle.eligibilityRoot,
+      verifierConfigHash: eligibility.bundle.verifierConfigHash,
       initialAuthorizedCaller: expectedMint,
     });
     const mint = await deployContract(deployer, mintArtifact, [

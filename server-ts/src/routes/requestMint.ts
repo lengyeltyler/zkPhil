@@ -42,23 +42,26 @@ interface MintProofPayload {
 }
 
 interface ProvingRequestPayload {
-  schema: 'zkphil-local-proof-request-v1';
+  schema: 'zkphil-local-proof-request-v2';
   provingMode: 'scarb-stwo';
+  provider: 'local-credential-commitment';
   kind: 'mint' | 'action';
   claimKind: number;
   recipient: string;
-  eligibilityRoot: string;
-  credentialSlot: string;
-  secret: string;
-  siblings: string[];
-  pathIndices: number[];
+  verifierConfigHash: string;
+  credentialSecret: string;
+  commitmentWitness: {
+    commitmentRoot: string;
+    siblings: string[];
+    pathIndices: number[];
+  };
   claimHash: string;
   expectedFactHash: string;
   expectedProofMetadata: string;
-  expectedNullifier: string;
-  expectedCredentialLeaf: string;
+  expectedIdentityNullifier: string;
+  expectedCredentialCommitment: string;
   programHash: string;
-  contextId: string;
+  proofContext: string;
   expiry: string;
 }
 
@@ -87,7 +90,7 @@ interface RequestMintFailure {
 type RequestMintResponse = RequestMintSuccess | RequestMintFailure;
 
 export interface RouteConfig {
-  contextId: string;
+  proofContext: string;
   programHash: string;
   chainId: number;
   proofGateAddress: string;
@@ -170,7 +173,7 @@ export default async function requestMintRoute(
   fastify: FastifyInstance,
   config: RouteConfig
 ) {
-  const contextId = BigInt(config.contextId);
+  const proofContext = BigInt(config.proofContext);
   const programHash = normalizeBytes32(config.programHash);
   const proofGateAddress = normalizeAddress(config.proofGateAddress);
   const chainId = BigInt(config.chainId);
@@ -240,7 +243,7 @@ export default async function requestMintRoute(
     async (request, reply) => {
       try {
         const recipient = normalizeAddress(request.query.address);
-        return await eligibilityProvider.getEligibility(contextId.toString(), recipient, 1);
+        return await eligibilityProvider.getEligibility(proofContext.toString(), recipient, 1);
       } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({
@@ -268,7 +271,7 @@ export default async function requestMintRoute(
     async (request, reply) => {
       try {
         const recipient = normalizeAddress(request.body.recipient);
-        return await eligibilityProvider.getEligibility(contextId.toString(), recipient, 1);
+        return await eligibilityProvider.getEligibility(proofContext.toString(), recipient, 1);
       } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({
@@ -347,7 +350,7 @@ export default async function requestMintRoute(
           const expiry = normalizeExpiry(body.expiry);
           const claimHash = computeActionClaimHash({
             programHash,
-            contextId,
+            proofContext,
             chainId,
             proofGateAddress,
             recipient,
@@ -356,19 +359,18 @@ export default async function requestMintRoute(
             expiry,
           });
           const credential = await eligibilityProvider.selectCredential(
-            contextId.toString(),
+            proofContext.toString(),
             recipient,
             body.actionType
           );
           const proofPayload = await buildProofPayload({
             programHash,
-            contextId,
+            proofContext,
             recipient,
             claimHash,
             claimKind: body.actionType,
-            eligibilityRoot: credential.eligibilityRoot,
-            secret: credential.secret,
-            credentialSlot: credential.credentialSlot,
+            verifierConfigHash: credential.verifierConfigHash,
+            secret: credential.credentialSecret,
             expiry,
           });
           const proof = {
@@ -377,23 +379,26 @@ export default async function requestMintRoute(
             signature: proofPayload.signature.toLowerCase(),
           };
           const provingRequest: ProvingRequestPayload = {
-            schema: 'zkphil-local-proof-request-v1',
+            schema: 'zkphil-local-proof-request-v2',
             provingMode: 'scarb-stwo',
+            provider: 'local-credential-commitment',
             kind,
             claimKind: body.actionType,
             recipient,
-            eligibilityRoot: normalizeHexUint256(credential.eligibilityRoot),
-            credentialSlot: normalizeHexUint256(credential.credentialSlot),
-            secret: normalizeHexUint256(credential.secret),
-            siblings: credential.siblings.map(normalizeHexUint256),
-            pathIndices: credential.pathIndices,
+            verifierConfigHash: normalizeHexUint256(credential.verifierConfigHash),
+            credentialSecret: normalizeHexUint256(credential.credentialSecret),
+            commitmentWitness: {
+              commitmentRoot: normalizeHexUint256(credential.commitmentWitness.commitmentRoot),
+              siblings: credential.commitmentWitness.siblings.map(normalizeHexUint256),
+              pathIndices: credential.commitmentWitness.pathIndices,
+            },
             claimHash: claimHash.toLowerCase(),
             expectedFactHash: proof.factHash,
             expectedProofMetadata: proof.signature,
-            expectedNullifier: normalizeHexUint256(proofPayload.publicOutputs.nullifier),
-            expectedCredentialLeaf: normalizeHexUint256(proofPayload.publicOutputs.credentialLeaf),
+            expectedIdentityNullifier: normalizeHexUint256(proofPayload.publicOutputs.identityNullifier),
+            expectedCredentialCommitment: normalizeHexUint256(proofPayload.publicOutputs.credentialCommitment),
             programHash,
-            contextId: normalizeHexUint256(contextId),
+            proofContext: normalizeHexUint256(proofContext),
             expiry: proof.expiry,
           };
 
@@ -429,7 +434,7 @@ export default async function requestMintRoute(
         const expiry = currentUnixTimeSeconds() + mintTtlSeconds;
         const claimHash = computeClaimHash({
           programHash,
-          contextId,
+          proofContext,
           chainId,
           proofGateAddress,
           recipient,
@@ -441,19 +446,18 @@ export default async function requestMintRoute(
           expiry,
         });
         const credential = await eligibilityProvider.selectCredential(
-          contextId.toString(),
+          proofContext.toString(),
           recipient,
           1
         );
         const proofPayload = await buildProofPayload({
           programHash,
-          contextId,
+          proofContext,
           recipient,
           claimHash,
           claimKind: 1,
-          eligibilityRoot: credential.eligibilityRoot,
-          secret: credential.secret,
-          credentialSlot: credential.credentialSlot,
+          verifierConfigHash: credential.verifierConfigHash,
+          secret: credential.credentialSecret,
           expiry,
         });
 
@@ -484,23 +488,26 @@ export default async function requestMintRoute(
         db.createIssuedMintProof(issuedMintProof);
 
         const provingRequest: ProvingRequestPayload = {
-          schema: 'zkphil-local-proof-request-v1',
+          schema: 'zkphil-local-proof-request-v2',
           provingMode: 'scarb-stwo',
+          provider: 'local-credential-commitment',
           kind,
           claimKind: 1,
           recipient,
-          eligibilityRoot: normalizeHexUint256(credential.eligibilityRoot),
-          credentialSlot: normalizeHexUint256(credential.credentialSlot),
-          secret: normalizeHexUint256(credential.secret),
-          siblings: credential.siblings.map(normalizeHexUint256),
-          pathIndices: credential.pathIndices,
+          verifierConfigHash: normalizeHexUint256(credential.verifierConfigHash),
+          credentialSecret: normalizeHexUint256(credential.credentialSecret),
+          commitmentWitness: {
+            commitmentRoot: normalizeHexUint256(credential.commitmentWitness.commitmentRoot),
+            siblings: credential.commitmentWitness.siblings.map(normalizeHexUint256),
+            pathIndices: credential.commitmentWitness.pathIndices,
+          },
           claimHash: claimHash.toLowerCase(),
           expectedFactHash: proof.factHash,
           expectedProofMetadata: proof.signature,
-          expectedNullifier: normalizeHexUint256(proofPayload.publicOutputs.nullifier),
-          expectedCredentialLeaf: normalizeHexUint256(proofPayload.publicOutputs.credentialLeaf),
+          expectedIdentityNullifier: normalizeHexUint256(proofPayload.publicOutputs.identityNullifier),
+          expectedCredentialCommitment: normalizeHexUint256(proofPayload.publicOutputs.credentialCommitment),
           programHash,
-          contextId: normalizeHexUint256(contextId),
+          proofContext: normalizeHexUint256(proofContext),
           expiry: proof.expiry,
         };
 

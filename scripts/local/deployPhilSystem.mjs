@@ -564,10 +564,10 @@ export async function deployPhilSystem({
   privateKey = process.env.PRIVATE_KEY || DEFAULT_PRIVATE_KEY,
   programHash = process.env.PROGRAM_HASH ||
     '0x4444444444444444444444444444444444444444444444444444444444444444',
-  contextId = BigInt(process.env.CONTEXT_ID || '13'),
+  proofContext = BigInt(process.env.PROOF_CONTEXT || process.env.CONTEXT_ID || '13'),
   factRegistryAddress = process.env.FACT_REGISTRY || '',
-  eligibilityRoot = process.env.ELIGIBILITY_ROOT || '',
-  eligibilityBundlePath = process.env.ELIGIBILITY_BUNDLE_PATH || '',
+  verifierConfigHash = process.env.VERIFIER_CONFIG_HASH || process.env.ELIGIBILITY_ROOT || '',
+  credentialBundlePath = process.env.CREDENTIAL_BUNDLE_PATH || process.env.ELIGIBILITY_BUNDLE_PATH || '',
   svgStorageAddress = process.env.PHIL_SVG_STORAGE || '',
   layerRegistryAddress = process.env.PHIL_LAYER_REGISTRY || '',
   writeDeployments = true,
@@ -599,6 +599,7 @@ export async function deployPhilSystem({
   const artifacts = compilePhilContracts();
   const rendererArtifact = getArtifact(artifacts, 'PhilRenderer');
   const devProofVerifierArtifact = getArtifact(artifacts, 'DevProofVerifier');
+  const humanityVerifierArtifact = getArtifact(artifacts, 'FactRegistryHumanityVerifier');
   const proofGateArtifact = getArtifact(artifacts, 'PhilIdentityGate');
   const mintArtifact = getArtifact(artifacts, 'PhilIdentityMint');
   const web3Artifact = getArtifact(artifacts, 'PhilWeb3');
@@ -630,20 +631,20 @@ export async function deployPhilSystem({
     from: deployer,
   });
 
-  const resolvedEligibilityRoot = (() => {
-    if (eligibilityRoot) return BigInt(eligibilityRoot);
-    if (eligibilityBundlePath) {
-      const bundle = JSON.parse(fs.readFileSync(path.resolve(eligibilityBundlePath), 'utf8'));
-      return BigInt(bundle.root);
+  const resolvedVerifierConfigHash = (() => {
+    if (verifierConfigHash) return BigInt(verifierConfigHash);
+    if (credentialBundlePath) {
+      const bundle = JSON.parse(fs.readFileSync(path.resolve(credentialBundlePath), 'utf8'));
+      return BigInt(bundle.verifierConfigHash);
     }
-    throw new Error('ELIGIBILITY_ROOT or ELIGIBILITY_BUNDLE_PATH must be set for ProofGate deployment.');
+    throw new Error('VERIFIER_CONFIG_HASH or CREDENTIAL_BUNDLE_PATH must be set for humanity verifier deployment.');
   })();
 
   const nextEoaNonce = dryRun ? planner.nextNonce : Number(await wallet.getNonce());
   const needsDevRegistryDeploy = !factRegistryAddress;
   const futureMintAddress = ethers.getCreateAddress({
     from: deployer,
-    nonce: nextEoaNonce + (needsDevRegistryDeploy ? 2 : 1),
+    nonce: nextEoaNonce + (needsDevRegistryDeploy ? 3 : 2),
   });
 
   let resolvedFactRegistryAddress = factRegistryAddress
@@ -666,15 +667,28 @@ export async function deployPhilSystem({
     resolvedFactRegistryAddress = registry.address;
   }
 
+  const verifier = await deployContract({
+    wallet,
+    provider,
+    artifact: humanityVerifierArtifact,
+    args: [
+      programHash,
+      proofContext,
+      resolvedFactRegistryAddress,
+      resolvedVerifierConfigHash,
+    ],
+    contractName: 'FactRegistryHumanityVerifier',
+    dryRun,
+    dryRunPlanner: planner,
+    from: deployer,
+  });
+
   const gate = await deployContract({
     wallet,
     provider,
     artifact: proofGateArtifact,
     args: [
-      programHash,
-      contextId,
-      resolvedFactRegistryAddress,
-      resolvedEligibilityRoot,
+      verifier.address,
       futureMintAddress,
     ],
     contractName: 'PhilIdentityGate',
@@ -714,13 +728,15 @@ export async function deployPhilSystem({
     rpcUrl,
     deployer,
     factRegistry: resolvedFactRegistryAddress,
-    eligibilityRoot: resolvedEligibilityRoot.toString(),
+    humanityVerifier: verifier.address,
+    verifierConfigHash: resolvedVerifierConfigHash.toString(),
     programHash,
-    contextId: contextId.toString(),
+    proofContext: proofContext.toString(),
     PhilSVGStorage: artBackend.svgStorageAddress,
     PhilLayerRegistry: artBackend.layerRegistryAddress,
     PhilNFT: artBackend.philNftAddress,
     PhilRenderer: renderer.address,
+    FactRegistryHumanityVerifier: verifier.address,
     PhilIdentityGate: gate.address,
     PhilIdentityMint: mint.address,
     PhilWeb3: web3.address,

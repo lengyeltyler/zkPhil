@@ -26,7 +26,7 @@
     "frontend:dev": "vite --config frontend-local/vite.config.mjs",
     "renderer:report": "node scripts/local/renderer-footprint-report.mjs",
     "node": "hardhat node",
-    "proofs:build-bundle": "node scripts/proofs/build_eligibility_bundle.mjs",
+    "proofs:build-bundle": "node scripts/proofs/build_credential_bundle.mjs",
     "proofs:prove-local": "node scripts/proofs/prove_local.mjs",
     "proofs:prove-server": "node scripts/proofs/local_prover_server.mjs",
     "proofs:verify-fact": "node scripts/proofs/verify_fact_registered.mjs",

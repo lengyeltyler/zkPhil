@@ -7,7 +7,7 @@ describe('/status', () => {
   it('returns the expanded compatibility fields', async () => {
     const app = Fastify();
     await app.register(statusRoute, {
-      contextId: 13n,
+      proofContext: 13n,
       programHash: '0x' + '44'.repeat(32),
       backendChainId: 31337,
       backendFactory: '0x1000000000000000000000000000000000000001',
@@ -26,7 +26,7 @@ describe('/status', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
         status: 'ok',
-        contextId: '0x' + '0'.repeat(63) + 'd',
+        proofContext: '0x' + '0'.repeat(63) + 'd',
         backendChainId: 31337,
         backendFactory: '0x1000000000000000000000000000000000000001',
         proofGateAddress: '0x2000000000000000000000000000000000000002',

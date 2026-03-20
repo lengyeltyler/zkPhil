@@ -19,7 +19,7 @@ interface VerifyBody {
 
 export interface AuthRouteConfig {
   db: PhilDatabase;
-  contextId: string;
+  proofContext: string;
   chainId: number;
   proofGateAddress: string;
 }
@@ -33,7 +33,7 @@ function normalizeAddress(value: string): string {
 }
 
 function buildChallengeMessage(input: {
-  contextId: string;
+  proofContext: string;
   chainId: number;
   proofGateAddress: string;
   recipient: string;
@@ -43,7 +43,7 @@ function buildChallengeMessage(input: {
 }): string {
   return [
     AUTH_TAG,
-    `contextId: ${input.contextId}`,
+    `proofContext: ${input.proofContext}`,
     `chainId: ${input.chainId}`,
     `proofGate: ${ethers.getAddress(input.proofGateAddress)}`,
     `recipient: ${ethers.getAddress(input.recipient)}`,
@@ -57,7 +57,7 @@ export default async function authRoute(
   fastify: FastifyInstance,
   config: AuthRouteConfig
 ) {
-  const { db, contextId, chainId, proofGateAddress } = config;
+  const { db, proofContext, chainId, proofGateAddress } = config;
 
   fastify.post<{ Body: ChallengeBody }>(
     '/auth/challenge',
@@ -83,7 +83,7 @@ export default async function authRoute(
         const expiresAt = issuedAt + CHALLENGE_TTL_SECONDS;
         const nonce = `0x${crypto.randomBytes(16).toString('hex')}`;
         const message = buildChallengeMessage({
-          contextId,
+          proofContext,
           chainId,
           proofGateAddress,
           recipient,

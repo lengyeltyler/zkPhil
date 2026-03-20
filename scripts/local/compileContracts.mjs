@@ -13,6 +13,7 @@ const ENTRY_FILES = [
   'contracts/PhilRenderer.sol',
   'contracts/PhilIdentityGate.sol',
   'contracts/proofs/DevProofVerifier.sol',
+  'contracts/proofs/FactRegistryHumanityVerifier.sol',
   'contracts/PhilIdentityMint.sol',
   'contracts/Phil369CadenceMint.sol',
   'contracts/PhilWeb3.sol',

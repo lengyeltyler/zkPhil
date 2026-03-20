@@ -14,10 +14,10 @@
  *   RPC_URL                   - JSON-RPC endpoint (e.g. http://127.0.0.1:8545 over an SSH tunnel)
  *   CHAIN_ID                  - Expected chain id (supported: 1, 11155111, 17000, 31337)
  *   PROGRAM_HASH              - Cairo program hash (bytes32 hex, 0x-prefixed)
- *   CONTEXT_ID                 - context identifier (default: 13)
+ *   PROOF_CONTEXT             - proof context identifier (default: 13)
  *   FACT_REGISTRY             - Optional external fact registry (required off local chain)
- *   ELIGIBILITY_ROOT          - Eligibility Merkle root (or set ELIGIBILITY_BUNDLE_PATH)
- *   ELIGIBILITY_BUNDLE_PATH   - Path to a generated eligibility bundle; deploy uses its root
+ *   VERIFIER_CONFIG_HASH      - Humanity verifier config hash (or set CREDENTIAL_BUNDLE_PATH)
+ *   CREDENTIAL_BUNDLE_PATH    - Path to a generated credential bundle; deploy uses its verifier config hash
  *   PHIL_SVG_STORAGE          - Optional existing PhilSVGStorage address
  *   PHIL_LAYER_REGISTRY       - Optional existing PhilLayerRegistry address
  *   REUSE_STARK_DEPLOYMENTS   - Reuse deployments/stark_<chainId>.json instead of redeploying
@@ -94,10 +94,10 @@ export function readDeployStarkConfig(env = process.env) {
     privateKey,
     programHash: programHash ||
       '0x4444444444444444444444444444444444444444444444444444444444444444',
-    contextId: BigInt(env.CONTEXT_ID || '13'),
+    proofContext: BigInt(env.PROOF_CONTEXT || env.CONTEXT_ID || '13'),
     factRegistryAddress: String(env.FACT_REGISTRY || '').trim(),
-    eligibilityRoot: String(env.ELIGIBILITY_ROOT || '').trim(),
-    eligibilityBundlePath: String(env.ELIGIBILITY_BUNDLE_PATH || '').trim(),
+    verifierConfigHash: String(env.VERIFIER_CONFIG_HASH || env.ELIGIBILITY_ROOT || '').trim(),
+    credentialBundlePath: String(env.CREDENTIAL_BUNDLE_PATH || env.ELIGIBILITY_BUNDLE_PATH || '').trim(),
     dryRun,
     reuseStark:
       !isTruthy(env.FORCE_REDEPLOY) &&
@@ -141,21 +141,21 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
   }
 
   console.log('\n' + '='.repeat(60));
-  console.log('PHIL ELIGIBILITY PROOF-GATED DEPLOYMENT');
+  console.log('PHIL HUMANITY-READY IDENTITY DEPLOYMENT');
   console.log('='.repeat(60));
   console.log(`Mode:         ${config.dryRun ? 'DRY_RUN (no broadcast)' : 'LIVE (broadcast)'}`);
   console.log(`RPC URL:      ${config.rpcUrl}`);
   console.log(`Chain ID:     ${connectedChainId}`);
   console.log(`Program Hash: ${config.programHash}`);
-  console.log(`Context ID:    ${config.contextId}`);
+  console.log(`Proof Context: ${config.proofContext}`);
   if (config.factRegistryAddress) {
     console.log(`Fact Registry: ${config.factRegistryAddress}`);
   }
-  if (config.eligibilityRoot) {
-    console.log(`Eligibility Root: ${config.eligibilityRoot}`);
+  if (config.verifierConfigHash) {
+    console.log(`Verifier Config: ${config.verifierConfigHash}`);
   }
-  if (config.eligibilityBundlePath) {
-    console.log(`Eligibility Bundle: ${config.eligibilityBundlePath}`);
+  if (config.credentialBundlePath) {
+    console.log(`Credential Bundle: ${config.credentialBundlePath}`);
   }
   console.log('Proof Mode:   Local Cairo + S-two proof facts');
   console.log('Fact Bridge:  DevProofVerifier (31337) / external FACT_REGISTRY (public chains)');
@@ -165,10 +165,10 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
     rpcUrl: config.rpcUrl,
     privateKey: config.privateKey || undefined,
     programHash: config.programHash,
-    contextId: config.contextId,
+    proofContext: config.proofContext,
     factRegistryAddress: config.factRegistryAddress,
-    eligibilityRoot: config.eligibilityRoot,
-    eligibilityBundlePath: config.eligibilityBundlePath,
+    verifierConfigHash: config.verifierConfigHash,
+    credentialBundlePath: config.credentialBundlePath,
     svgStorageAddress: config.svgStorageAddress,
     layerRegistryAddress: config.layerRegistryAddress,
     writeDeployments: !config.dryRun,
@@ -186,10 +186,11 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
     PhilLayerRegistry: deployments.PhilLayerRegistry,
     PhilNFT: deployments.PhilNFT,
     PhilWeb3: deployments.PhilWeb3,
+    FactRegistryHumanityVerifier: deployments.FactRegistryHumanityVerifier,
     programHash: config.programHash,
-    contextId: config.contextId.toString(),
+    proofContext: config.proofContext.toString(),
     factRegistry: deployments.factRegistry,
-    eligibilityRoot: deployments.eligibilityRoot,
+    verifierConfigHash: deployments.verifierConfigHash,
     artBackendReused: deployments.artBackendReused,
     artBackendSource: deployments.artBackendSource,
     ProofMode: 'LOCAL_STWO_FACTS',

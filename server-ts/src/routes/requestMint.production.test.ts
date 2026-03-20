@@ -10,9 +10,9 @@ import authRoute from './auth.js';
 import requestMintRoute from './requestMint.js';
 import { createEligibilityProvider } from '../lib/eligibility.js';
 import { PhilDatabase } from '../lib/db.js';
-import { buildEligibilityBundle } from '../../../shared/proof/eligibilityBundle.mjs';
+import { buildCredentialBundle } from '../../../shared/proof/credentialBundle.mjs';
 
-const CONTEXT_ID = '13';
+const PROOF_CONTEXT = '13';
 const PROGRAM_HASH = '0x' + '44'.repeat(32);
 const PROOF_GATE = '0x1000000000000000000000000000000000000013';
 const CHAIN_ID = 31337;
@@ -52,28 +52,28 @@ async function createApp(allowedAddress: string) {
   const db = new PhilDatabase(':memory:');
   const app = Fastify();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-request-mint-production-'));
-  const bundlePath = path.join(tempDir, 'eligibility-bundle.json');
-  fs.writeFileSync(bundlePath, JSON.stringify(buildEligibilityBundle({
-    contextId: CONTEXT_ID,
-    entries: [{ recipient: allowedAddress, credentialSlot: 0 }],
+  const bundlePath = path.join(tempDir, 'credential-bundle.json');
+  fs.writeFileSync(bundlePath, JSON.stringify(buildCredentialBundle({
+    proofContext: PROOF_CONTEXT,
+    entries: [{ recipient: allowedAddress, credentialNonce: 0 }],
     seed: 'request-mint-production-test',
   }), null, 2));
 
   await app.register(authRoute, {
     db,
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     chainId: CHAIN_ID,
     proofGateAddress: PROOF_GATE,
   });
 
   await app.register(requestMintRoute, {
-    contextId: CONTEXT_ID,
+    proofContext: PROOF_CONTEXT,
     programHash: PROGRAM_HASH,
     chainId: CHAIN_ID,
     proofGateAddress: PROOF_GATE,
     eligibilityProvider: createEligibilityProvider({
       env: {
-        ELIGIBILITY_BUNDLE_PATH: bundlePath,
+        CREDENTIAL_BUNDLE_PATH: bundlePath,
       } as NodeJS.ProcessEnv,
       isNullifierSpent: async () => false,
       isProofReserved: async (proofMetadata) =>

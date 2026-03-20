@@ -10,7 +10,7 @@ interface IProofGate {
         // Deterministic fact hash binding the Cairo public outputs to the claim intent.
         bytes32 factHash;
         // Opaque proof metadata bytes. In zkPhil's local S-two flow this is
-        // abi.encode(nullifier, credentialSlot, credentialLeaf).
+        // abi.encode(identityNullifier, credentialCommitment).
         bytes signature;
     }
 
