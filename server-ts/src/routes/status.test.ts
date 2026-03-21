@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import statusRoute from './status.js';
 
 describe('/status', () => {
-  it('returns the expanded compatibility fields', async () => {
+  it('returns the current provider-aware status fields', async () => {
     const app = Fastify();
     await app.register(statusRoute, {
       proofContext: 13n,

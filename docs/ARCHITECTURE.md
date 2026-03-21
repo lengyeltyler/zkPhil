@@ -145,6 +145,8 @@ Retained:
 Dev helper behavior:
 
 - `scripts/run_local_e2e.sh` now performs readiness checks for RPC, prover, backend, Stark core, 4337, and the art backend
+- `npm run smoke:local` wraps helper bring-up, readiness checks, the mock-humanity flow, deterministic assertions, and teardown
+- `npm run status:sepolia` reports the stable reuse boundary and mutable Sepolia manifests in one place
 - local helper runs pin Node 22 for backend/prover/bootstrap work even when the interactive shell defaults to an older Node
 - proof bundles live under `generated/proofs/` so compiler output cleanup does not erase them
 

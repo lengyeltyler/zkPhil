@@ -29,12 +29,12 @@ function parseArgs(argv) {
   return args;
 }
 
-function deriveWallet(provider, index) {
+export function deriveWallet(provider, index) {
   const hd = ethers.HDNodeWallet.fromPhrase(MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`);
   return hd.connect(provider);
 }
 
-function deterministicStarkKeyX(owner, chainId = DEFAULT_CHAIN_ID) {
+export function deterministicStarkKeyX(owner, chainId = DEFAULT_CHAIN_ID) {
   const pubKey = ethers.solidityPackedKeccak256(
     ['string', 'uint256', 'address'],
     ['phil-test-mode-stark-pubkey', BigInt(chainId), owner]
@@ -42,13 +42,13 @@ function deterministicStarkKeyX(owner, chainId = DEFAULT_CHAIN_ID) {
   return ethers.toBeHex(BigInt(pubKey), 32);
 }
 
-function readDeployment(fileName) {
+export function readDeployment(fileName) {
   return JSON.parse(
     fs.readFileSync(path.join(ROOT_DIR, 'deployments', fileName), 'utf8')
   );
 }
 
-async function fetchJson(url, options = {}) {
+export async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
@@ -59,7 +59,7 @@ async function fetchJson(url, options = {}) {
   return payload;
 }
 
-async function authenticate(serverUrl, wallet) {
+export async function authenticate(serverUrl, wallet) {
   const challenge = await fetchJson(`${serverUrl}/auth/challenge`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -77,7 +77,7 @@ async function authenticate(serverUrl, wallet) {
   return verify.token;
 }
 
-async function requestProof({
+export async function requestProof({
   serverUrl,
   proverUrl,
   token,
@@ -117,7 +117,7 @@ async function requestProof({
   };
 }
 
-async function runMintFlow({
+export async function runMintFlow({
   wallet,
   mockHumanId,
   philId,
@@ -126,6 +126,7 @@ async function runMintFlow({
   serverUrl,
   proverUrl,
   deployments,
+  deployments4337,
 }) {
   const token = await authenticate(serverUrl, wallet);
   const factory = new ethers.Contract(
@@ -207,26 +208,29 @@ async function runMintFlow({
   };
 }
 
-const args = parseArgs(process.argv);
-const rpcUrl = args.rpc || process.env.RPC_URL || DEFAULT_RPC_URL;
-const serverUrl = args.server || process.env.SERVER_URL || DEFAULT_SERVER_URL;
-const proverUrl = args.prover || process.env.PROVER_URL || DEFAULT_PROVER_URL;
-const mockHumanA = args.mockHumanA || 'atlas';
-const mockHumanB = args.mockHumanB || 'briar';
+export async function runMockHumanityFlow({
+  rpcUrl = process.env.RPC_URL || DEFAULT_RPC_URL,
+  serverUrl = process.env.SERVER_URL || DEFAULT_SERVER_URL,
+  proverUrl = process.env.PROVER_URL || DEFAULT_PROVER_URL,
+  mockHumanA = 'atlas',
+  mockHumanB = 'briar',
+  walletAIndex = 1,
+  walletBIndex = 2,
+  deployments = readDeployment('stark_31337.json'),
+  deployments4337 = readDeployment('4337_31337.json'),
+  log = true,
+} = {}) {
+  const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { batchMaxCount: 1 });
+  const walletA = deriveWallet(provider, Number(walletAIndex));
+  const walletB = deriveWallet(provider, Number(walletBIndex));
 
-const deployments = readDeployment('stark_31337.json');
-const deployments4337 = readDeployment('4337_31337.json');
-
-const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { batchMaxCount: 1 });
-const walletA = deriveWallet(provider, Number(args.walletA || 1));
-const walletB = deriveWallet(provider, Number(args.walletB || 2));
-
-async function main() {
-  console.log('Running mock-humanity end-to-end flow...');
-  console.log(`  RPC: ${rpcUrl}`);
-  console.log(`  Server: ${serverUrl}`);
-  console.log(`  Prover: ${proverUrl}`);
-  console.log(`  Mock humans: ${mockHumanA}, ${mockHumanB}`);
+  if (log) {
+    console.log('Running mock-humanity end-to-end flow...');
+    console.log(`  RPC: ${rpcUrl}`);
+    console.log(`  Server: ${serverUrl}`);
+    console.log(`  Prover: ${proverUrl}`);
+    console.log(`  Mock humans: ${mockHumanA}, ${mockHumanB}`);
+  }
 
   const first = await runMintFlow({
     wallet: walletA,
@@ -237,8 +241,11 @@ async function main() {
     serverUrl,
     proverUrl,
     deployments,
+    deployments4337,
   });
-  console.log(`Minted ${mockHumanA} to ${first.smartAccount} as token ${first.tokenId}`);
+  if (log) {
+    console.log(`Minted ${mockHumanA} to ${first.smartAccount} as token ${first.tokenId}`);
+  }
 
   const tokenB = await authenticate(serverUrl, walletB);
   let sameHumanRejected = false;
@@ -265,7 +272,9 @@ async function main() {
   if (!sameHumanRejected) {
     throw new Error(`Expected ${mockHumanA} to be rejected on second use`);
   }
-  console.log(`Confirmed ${mockHumanA} cannot mint twice`);
+  if (log) {
+    console.log(`Confirmed ${mockHumanA} cannot mint twice`);
+  }
 
   const second = await runMintFlow({
     wallet: walletB,
@@ -276,11 +285,45 @@ async function main() {
     serverUrl,
     proverUrl,
     deployments,
+    deployments4337,
   });
-  console.log(`Minted ${mockHumanB} to ${second.smartAccount} as token ${second.tokenId}`);
+  if (log) {
+    console.log(`Minted ${mockHumanB} to ${second.smartAccount} as token ${second.tokenId}`);
+  }
+
+  return {
+    rpcUrl,
+    serverUrl,
+    proverUrl,
+    mockHumanA,
+    mockHumanB,
+    walletA: walletA.address,
+    walletB: walletB.address,
+    first,
+    second,
+  };
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message || String(error));
-  process.exit(1);
-});
+async function main() {
+  const args = parseArgs(process.argv);
+  const summary = await runMockHumanityFlow({
+    rpcUrl: args.rpc || process.env.RPC_URL || DEFAULT_RPC_URL,
+    serverUrl: args.server || process.env.SERVER_URL || DEFAULT_SERVER_URL,
+    proverUrl: args.prover || process.env.PROVER_URL || DEFAULT_PROVER_URL,
+    mockHumanA: args.mockHumanA || 'atlas',
+    mockHumanB: args.mockHumanB || 'briar',
+    walletAIndex: Number(args.walletA || 1),
+    walletBIndex: Number(args.walletB || 2),
+    log: !args.json,
+  });
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.stack || error.message || String(error));
+    process.exit(1);
+  });
+}

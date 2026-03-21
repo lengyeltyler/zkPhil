@@ -11,7 +11,6 @@
 ## New preferred environment variables
 
 - `HUMANITY_PROVIDER`
-- `HUMANITY_BUNDLE_PATH`
 - `CREDENTIAL_BUNDLE_PATH`
 - `MOCK_HUMANITY_BUNDLE_PATH`
 - `PROOF_CONTEXT`
@@ -27,7 +26,17 @@
 - `ART_BACKEND_MANIFEST_PATH`
 - `NODE_BIN`
 
-Legacy aliases such as `CONTEXT_ID`, `ELIGIBILITY_BUNDLE_PATH`, and `ELIGIBILITY_ROOT` are still tolerated in a few places as compatibility fallbacks.
+Removed from the active tracked workflow:
+
+- `CONTEXT_ID`
+- `ELIGIBILITY_BUNDLE_PATH`
+- `ELIGIBILITY_ROOT`
+- `HUMANITY_BUNDLE_PATH`
+
+Retained because they still provide real compatibility value:
+
+- `verify:sepolia` remains as a stricter alias for live Sepolia verification
+- the database migration from `allowlist_entitlements` to `eligibility_entitlements` remains to protect existing local DBs
 
 ## Mock-humanity additions
 
@@ -62,10 +71,16 @@ Start the local prover service:
 node scripts/proofs/local_prover_server.mjs
 ```
 
-Execute the smoke flow after the chain and backend are running:
+Execute the direct CLI flow after the chain and backend are running:
 
 ```bash
 node scripts/local/mock_humanity_flow.mjs
+```
+
+Or run the single-command smoke path:
+
+```bash
+npm run smoke:local
 ```
 
 ## Request artifact

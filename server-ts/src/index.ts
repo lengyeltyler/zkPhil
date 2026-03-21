@@ -75,7 +75,7 @@ function resolveWritablePath(rawPath: string): string {
 
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '127.0.0.1';
-const PROOF_CONTEXT_RAW = process.env.PROOF_CONTEXT || process.env.CONTEXT_ID || '13';
+const PROOF_CONTEXT_RAW = process.env.PROOF_CONTEXT || '13';
 const DATABASE_PATH = resolveWritablePath(process.env.DATABASE_PATH || './server-ts/data/phil_identity.db');
 const PROGRAM_HASH = process.env.PROGRAM_HASH || '';
 const CHAIN_ID_RAW = process.env.CHAIN_ID || '';

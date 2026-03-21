@@ -13,6 +13,13 @@ World / World ID is still not implemented here.
 No external World services are called.
 The active verifier bridge is still fact-registry-based.
 
+## Fast paths
+
+- Local CI-safe smoke: `npm run smoke:local`
+- Local helper control: `npm run local:up -- --fresh`, `npm run local:status`, `npm run local:down`
+- Sepolia status: `npm run status:sepolia`
+- Strict live Sepolia verification: `npm run verify:sepolia`
+
 ## Stable vs mutable infrastructure
 
 - Stable Sepolia trait/data infrastructure now lives in [`config/stable-art-backends/sepolia.json`](./config/stable-art-backends/sepolia.json).
@@ -86,7 +93,7 @@ Run the local prover service:
 npm run proofs:prove-server
 ```
 
-Run the mock-humanity smoke flow after the chain, backend, and prover are up:
+Run the direct mock-humanity CLI flow after the chain, backend, and prover are up:
 
 ```bash
 npm run local:mock-flow
@@ -94,10 +101,17 @@ npm run local:mock-flow
 
 ## Local dev quick start
 
-Helper script:
+One-command smoke path:
 
 ```bash
-bash scripts/run_local_e2e.sh up --fresh
+npm run smoke:local
+```
+
+Manual helper path:
+
+```bash
+npm run local:up -- --fresh
+npm run local:status
 ```
 
 That helper bootstraps:
@@ -112,8 +126,8 @@ That helper bootstraps:
 Useful helper commands:
 
 ```bash
-bash scripts/run_local_e2e.sh status
-bash scripts/run_local_e2e.sh down
+npm run local:status
+npm run local:down
 bash scripts/run_local_e2e.sh clean
 ```
 
@@ -132,7 +146,7 @@ http://localhost:8080/frontend/mint.html?chainId=31337&server=http://127.0.0.1:8
 Stop the helper-managed services:
 
 ```bash
-bash scripts/run_local_e2e.sh down
+npm run local:down
 ```
 
 The helper writes logs under `.local-dev/` and keeps reusable manifests under `deployments/`.
@@ -140,20 +154,36 @@ Bundle artifacts now live under `generated/proofs/` so compile steps do not wipe
 
 For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md).
 
+## Sepolia status
+
+`npm run status:sepolia` reports the stable reused art/data addresses, the mutable deployment manifests, missing env/config values, and whether live verification ran or was skipped.
+
+`npm run verify:sepolia` is the stricter compatibility alias for live verification when a usable Sepolia RPC and signer config are available.
+
 ## Environment highlights
 
+Primary:
 - `HUMANITY_PROVIDER`
-- `HUMANITY_BUNDLE_PATH`
 - `CREDENTIAL_BUNDLE_PATH`
 - `MOCK_HUMANITY_BUNDLE_PATH`
+- `PROOF_CONTEXT`
+- `RPC_URL`
+- `RPC_URL_SEPOLIA`
+- `PAYMASTER_SIGNER_KEY`
+- `STARKNET_CORE`
+- `L2_UNLOCK_VERIFIER`
+
+Optional:
 - `ART_BACKEND_MODE`
 - `ART_BACKEND_MANIFEST_PATH`
-- `PROOF_CONTEXT`
 - `FACT_REGISTRY`
 - `FACT_REGISTRY_OPERATOR_KEY`
+- `PAYMASTER_SIGNER`
 - `LOCAL_PROVER_HOST`
 - `LOCAL_PROVER_PORT`
 - `NODE_BIN`
+
+Generic bundle-path and old proof-context compatibility aliases from earlier refactors have been removed from the active tracked workflow.
 
 See [`.env.example`](./.env.example) for the full template.
 
@@ -163,11 +193,13 @@ See [`.env.example`](./.env.example) for the full template.
 scarb --manifest-path cairo/Scarb.toml test
 cd server-ts && npx vitest --run src/lib/eligibility.test.ts src/routes/status.test.ts src/routes/requestMint.test.ts src/routes/requestMint.production.test.ts src/routes/signPaymaster.test.ts
 node --test test/eligibility-proof.contract.test.mjs test/mock-humanity.contract.test.mjs test/error-cases.contract.test.mjs test/verify-sepolia-bindings.test.mjs
+node --test test/sepolia-status.test.mjs
 ```
 
 ## Docs
 
 - Architecture: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
+- Cleanup report: [`CLEANUP_REPORT.md`](./CLEANUP_REPORT.md)
 - DEV runbook: [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 - Project status: [`PROJECT_STATUS_REPORT.md`](./PROJECT_STATUS_REPORT.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)

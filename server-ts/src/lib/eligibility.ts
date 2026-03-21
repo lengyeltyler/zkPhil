@@ -159,26 +159,17 @@ function resolveWritablePath(rawPath: string): string {
 }
 
 function resolveCredentialBundlePath(env: NodeJS.ProcessEnv): string {
-  const rawPath = String(
-    env.HUMANITY_BUNDLE_PATH ||
-    env.CREDENTIAL_BUNDLE_PATH ||
-    env.ELIGIBILITY_BUNDLE_PATH ||
-    ''
-  ).trim();
+  const rawPath = String(env.CREDENTIAL_BUNDLE_PATH || '').trim();
   if (!rawPath) {
-    throw new Error('CREDENTIAL_BUNDLE_PATH or HUMANITY_BUNDLE_PATH must be set for local-credential mode');
+    throw new Error('CREDENTIAL_BUNDLE_PATH must be set for local-credential mode');
   }
   return resolveWritablePath(rawPath);
 }
 
 function resolveMockHumanityBundlePath(env: NodeJS.ProcessEnv): string {
-  const rawPath = String(
-    env.MOCK_HUMANITY_BUNDLE_PATH ||
-    env.HUMANITY_BUNDLE_PATH ||
-    ''
-  ).trim();
+  const rawPath = String(env.MOCK_HUMANITY_BUNDLE_PATH || '').trim();
   if (!rawPath) {
-    throw new Error('MOCK_HUMANITY_BUNDLE_PATH or HUMANITY_BUNDLE_PATH must be set for mock-humanity mode');
+    throw new Error('MOCK_HUMANITY_BUNDLE_PATH must be set for mock-humanity mode');
   }
   return resolveWritablePath(rawPath);
 }

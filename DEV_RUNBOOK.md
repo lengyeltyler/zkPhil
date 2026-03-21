@@ -20,18 +20,35 @@ npm install
 cd server-ts && npm install && cd ..
 ```
 
-## Option A: helper bootstrap
+## Option A: single-command smoke
+
+Run the full local smoke pass:
+
+```bash
+npm run smoke:local
+```
+
+This command:
+
+- brings the local stack up fresh
+- checks readiness
+- runs the mock-humanity flow
+- asserts token ownership and supply changes
+- writes `.local-dev/smoke-local-summary.json`
+- tears the stack down
+
+## Option B: helper bootstrap
 
 Bring up the local stack:
 
 ```bash
-bash scripts/run_local_e2e.sh up --fresh
+npm run local:up -- --fresh
 ```
 
 Check readiness:
 
 ```bash
-bash scripts/run_local_e2e.sh status
+npm run local:status
 ```
 
 Serve the frontend:
@@ -55,7 +72,7 @@ npm run local:mock-flow
 Stop helper-managed services:
 
 ```bash
-bash scripts/run_local_e2e.sh down
+npm run local:down
 ```
 
 Notes:
@@ -64,7 +81,7 @@ Notes:
 - Stable proof bundles are written to `generated/proofs/`, not `artifacts/`, so Solidity compile steps do not erase them.
 - Helper logs live under `.local-dev/`.
 
-## Option B: explicit manual bootstrap
+## Option C: explicit manual bootstrap
 
 ### 1. Build the mock-humanity bundle
 
@@ -178,10 +195,10 @@ Then:
 6. Try `atlas` again and confirm the flow is rejected.
 7. Switch to `briar` and confirm it can mint.
 
-### 10. Run the CLI smoke flow
+### 10. Run the direct CLI mock-humanity flow
 
 ```bash
-node scripts/local/mock_humanity_flow.mjs
+npm run local:mock-flow
 ```
 
 This script:
@@ -196,6 +213,12 @@ This script:
 - mints once for mock human B
 
 ## Relevant test commands
+
+### Local smoke
+
+```bash
+npm run smoke:local
+```
 
 ### Cairo
 
@@ -221,7 +244,8 @@ node --test \
   test/eligibility-proof.contract.test.mjs \
   test/mock-humanity.contract.test.mjs \
   test/error-cases.contract.test.mjs \
-  test/verify-sepolia-bindings.test.mjs
+  test/verify-sepolia-bindings.test.mjs \
+  test/sepolia-status.test.mjs
 ```
 
 ## Reuse notes
@@ -230,3 +254,17 @@ node --test \
 - Local helper runs write mutable manifests under `deployments/art_31337.json`, `deployments/stark_31337.json`, and `deployments/4337_31337.json`.
 - `ART_BACKEND_MODE=reuse-existing-data` reuses a healthy local art manifest.
 - `ART_BACKEND_MODE=reuse-stable` is intended for stable public-chain trait/data reuse.
+
+## Sepolia status
+
+Use:
+
+```bash
+npm run status:sepolia
+```
+
+For strict live verification with a usable Sepolia RPC and signer config:
+
+```bash
+npm run verify:sepolia
+```

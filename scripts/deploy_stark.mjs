@@ -2,7 +2,7 @@
  * Deployment Script for Phil Identity SHARP-Gated Architecture
  *
  * Deploys (using deployPhilSystem from scripts/local/deployPhilSystem.mjs):
- * 1. PhilRenderer (legacy interface, backed by PhilLayerRegistry + PhilSVGStorage)
+ * 1. PhilRenderer (current renderer entrypoint backed by PhilLayerRegistry + PhilSVGStorage)
  * 2. PhilWeb3 (standalone ERC-4804 endpoint; tokenURI remains fully inline)
  * 3. PhilIdentityGate
  * 4. PhilIdentityMint
@@ -99,12 +99,12 @@ export function readDeployStarkConfig(env = process.env) {
     privateKey,
     programHash: programHash ||
       '0x4444444444444444444444444444444444444444444444444444444444444444',
-    proofContext: BigInt(env.PROOF_CONTEXT || env.CONTEXT_ID || '13'),
+    proofContext: BigInt(env.PROOF_CONTEXT || '13'),
     factRegistryAddress: String(env.FACT_REGISTRY || '').trim(),
     humanityProvider: String(env.HUMANITY_PROVIDER || 'local-credential').trim(),
-    verifierConfigHash: String(env.VERIFIER_CONFIG_HASH || env.ELIGIBILITY_ROOT || '').trim(),
-    credentialBundlePath: String(env.CREDENTIAL_BUNDLE_PATH || env.ELIGIBILITY_BUNDLE_PATH || '').trim(),
-    mockHumanityBundlePath: String(env.MOCK_HUMANITY_BUNDLE_PATH || env.HUMANITY_BUNDLE_PATH || '').trim(),
+    verifierConfigHash: String(env.VERIFIER_CONFIG_HASH || '').trim(),
+    credentialBundlePath: String(env.CREDENTIAL_BUNDLE_PATH || '').trim(),
+    mockHumanityBundlePath: String(env.MOCK_HUMANITY_BUNDLE_PATH || '').trim(),
     artBackendMode: String(env.ART_BACKEND_MODE || '').trim(),
     artBackendManifestPath: String(env.ART_BACKEND_MANIFEST_PATH || '').trim(),
     dryRun,

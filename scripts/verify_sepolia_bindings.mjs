@@ -4,10 +4,11 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
+
 const DEFAULT_CHAIN_ID = 11155111;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
-const RPC_RETRY_DELAYS_MS = [1500, 3000, 6000];
 
 function readDeployment(prefix, chainId, rootDir = ROOT_DIR) {
   const manifestPath = path.join(rootDir, 'deployments', `${prefix}_${chainId}.json`);
@@ -259,31 +260,6 @@ export async function runVerifySepoliaBindings(
     console.log(`  PhilUnlockInbox.starknetCore(): ${onchainStarknetCore}`);
     console.log(`  PhilUnlockInbox.l2VerifierAddress(): ${onchainL2Verifier}`);
   });
-}
-
-function isRateLimitError(error) {
-  const message = String(error?.shortMessage || error?.message || error);
-  return (
-    message.includes('Too Many Requests') ||
-    message.includes('-32005') ||
-    message.includes('rate limit')
-  );
-}
-
-async function withRpcRetry(label, fn) {
-  for (let index = 0; ; index += 1) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (!isRateLimitError(error) || index >= RPC_RETRY_DELAYS_MS.length) {
-        throw error;
-      }
-
-      const delayMs = RPC_RETRY_DELAYS_MS[index];
-      console.warn(`${label}: RPC rate-limited, retrying in ${delayMs}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
 }
 
 async function main() {

@@ -22,7 +22,7 @@ const ENTRY_FILES = [
   'contracts/SSTORE2Deployer.sol',
   'contracts/PhilFragments.sol',
   'contracts/PhilPalettes.sol',
-  // Smart account stack — needed for account + marketplace smoke tests (Phase 4+)
+  // Smart account stack needed by the current identity + marketplace workflow.
   'contracts/PhilAccount.sol',
   'contracts/PhilAccountFactory.sol',
   // Test mocks
