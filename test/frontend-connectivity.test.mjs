@@ -6,8 +6,10 @@ import "dotenv/config";
 import { ethers } from "ethers";
 
 import { DEPLOYMENTS_DIR, FRONTEND_DIR, readJson } from "../src/workspace.mjs";
+import { getStableArtBackendManifestPath } from "../shared/deploy/artBackendManifest.mjs";
 
-const deployment = readJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"));
+const deployment = readJson(getStableArtBackendManifestPath(11155111))
+  || readJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"));
 const frontendContracts = readJson(path.join(FRONTEND_DIR, "public", "contracts.json"));
 
 const rpcUrl = process.env.RPC_URL_SEPOLIA || process.env.RPC_URL;

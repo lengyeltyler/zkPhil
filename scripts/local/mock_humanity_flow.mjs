@@ -52,7 +52,8 @@ async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
-    const reason = payload?.error || payload?.code || `HTTP ${res.status}`;
+    const codePrefix = payload?.code ? `${payload.code}: ` : '';
+    const reason = `${codePrefix}${payload?.error || payload?.code || `HTTP ${res.status}`}`;
     throw new Error(`${url} failed: ${reason}`);
   }
   return payload;
@@ -256,7 +257,10 @@ async function main() {
       }),
     });
   } catch (error) {
-    sameHumanRejected = String(error.message || error).includes('MOCK_HUMAN_ALREADY_USED');
+    const message = String(error.message || error);
+    sameHumanRejected =
+      message.includes('MOCK_HUMAN_ALREADY_USED') ||
+      message.includes('already consumed its Phil identity nullifier');
   }
   if (!sameHumanRejected) {
     throw new Error(`Expected ${mockHumanA} to be rejected on second use`);

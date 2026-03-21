@@ -1,5 +1,7 @@
 import { ethers } from 'ethers';
 
+import { withRpcRetry } from '../../shared/deploy/rpcRetry.mjs';
+
 const DEFAULT_TIMEOUT_MS = Number(process.env.TX_TIMEOUT_MS || '180000');
 
 function getExplorerBase(chainId) {
@@ -42,7 +44,10 @@ export async function waitForReceiptWithTimeout(
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const receipt = await provider.getTransactionReceipt(txHash);
+    const receipt = await withRpcRetry(
+      `getTransactionReceipt(${txHash})`,
+      () => provider.getTransactionReceipt(txHash)
+    );
     if (!receipt) {
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       continue;

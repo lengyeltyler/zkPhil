@@ -41,6 +41,7 @@ import {
   planDeploy,
 } from '../shared/deploy/dryRun.mjs';
 import { logTx, waitForReceiptWithTimeout } from './sepolia/txutil.mjs';
+import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -96,7 +97,16 @@ async function deployContract({
   }
 
   const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, wallet);
-  const contract = await factory.deploy(...args);
+  const contract = await withRpcRetry(
+    `deploy ${contractName}`,
+    () => factory.deploy(...args),
+    {
+      onRetry: ({ delayMs, reason }) => {
+        console.warn(`Deploy ${contractName} hit a transient RPC error: ${reason}`);
+        console.warn(`Retrying ${contractName} deployment in ${delayMs}ms...`);
+      },
+    }
+  );
   const deploymentTx = contract.deploymentTransaction();
   if (!deploymentTx) {
     throw new Error(`Missing deployment transaction for ${contractName}`);
@@ -145,10 +155,26 @@ async function callContract({
   const contract = new ethers.Contract(contractAddress, abi, wallet);
   const overrideKeys = Object.keys(overrides).filter((key) => overrides[key] != null);
   const txArgs = overrideKeys.length > 0 ? [...args, overrides] : args;
-  const tx = await contract[method](...txArgs);
+  const tx = await withRpcRetry(
+    `${contractName}.${method}`,
+    () => contract[method](...txArgs),
+    {
+      onRetry: ({ delayMs, reason }) => {
+        console.warn(`${contractName}.${method} hit a transient RPC error: ${reason}`);
+        console.warn(`Retrying ${contractName}.${method} in ${delayMs}ms...`);
+      },
+    }
+  );
   logTx(`${contractName}.${method}`, tx.hash);
   await waitForReceiptWithTimeout(provider, tx.hash);
   return tx;
+}
+
+async function getCodeRaw(provider, address) {
+  return withRpcRetry(
+    `eth_getCode(${address})`,
+    () => provider.send('eth_getCode', [address, 'latest'])
+  );
 }
 
 function weiToEth(wei) {
@@ -237,7 +263,11 @@ export function readDeploy4337Config(env = process.env) {
 }
 
 export async function runDeploy4337(config = readDeploy4337Config(process.env)) {
-  const provider = new ethers.JsonRpcProvider(config.rpcUrl, undefined, { batchMaxCount: 1 });
+  const provider = new ethers.JsonRpcProvider(
+    config.rpcUrl,
+    config.configuredChainId,
+    { batchMaxCount: 1, staticNetwork: true }
+  );
   const rawWallet = new ethers.Wallet(
     config.privateKey ||
       '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
@@ -250,8 +280,9 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
     installDryRunGuards(rawWallet, wallet);
   }
 
-  const network = await provider.getNetwork();
-  const chainId = Number(network.chainId);
+  const chainId = Number(
+    BigInt(await withRpcRetry('ping 4337 deployment rpc', () => provider.send('eth_chainId', [])))
+  );
   if (chainId !== config.configuredChainId) {
     throw new Error(`RPC chain mismatch. Connected chainId=${chainId}, expected ${config.configuredChainId}.`);
   }
@@ -267,7 +298,7 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   const entryPointAddress = isLocalChain ? LOCAL_ENTRY_POINT_V07 : ENTRY_POINT_V07;
 
   if (isLocalChain) {
-    const existingEntryPointCode = await provider.getCode(entryPointAddress);
+    const existingEntryPointCode = await getCodeRaw(provider, entryPointAddress);
     if (existingEntryPointCode === '0x') {
       if (config.dryRun) {
         console.log(
@@ -285,12 +316,17 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
           dryRunPlanner: null,
           from: deployerAddress,
         });
-        const runtimeCode = await provider.getCode(entryPointMockImpl.address);
+        const runtimeCode = await getCodeRaw(provider, entryPointMockImpl.address);
+        if (runtimeCode === '0x') {
+          throw new Error(
+            `EntryPointLocalMock deployed at ${entryPointMockImpl.address}, but eth_getCode returned empty code.`
+          );
+        }
         let installedCode = '0x';
         for (let attempt = 1; attempt <= 5; attempt += 1) {
           await provider.send('hardhat_setCode', [entryPointAddress, runtimeCode]);
           await provider.send('evm_mine', []);
-          installedCode = await provider.getCode(entryPointAddress);
+          installedCode = await getCodeRaw(provider, entryPointAddress);
           if (installedCode !== '0x') break;
         }
         if (installedCode === '0x') {
@@ -349,9 +385,10 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   const paymasterSignerAddr = new ethers.Wallet(effectivePaymasterSignerKey).address;
 
   let useMockInbox = config.useMockInbox;
-  let starknetCore = config.starknetCore;
-  let l2UnlockVerifier = config.l2UnlockVerifier;
-  if (useMockInbox && !l2UnlockVerifier) {
+  let starknetCore = looksLikePlaceholder(config.starknetCore) ? '' : config.starknetCore;
+  let l2UnlockVerifier = looksLikePlaceholder(config.l2UnlockVerifier) ? '' : config.l2UnlockVerifier;
+  if (useMockInbox) {
+    starknetCore = '';
     l2UnlockVerifier = '0';
   }
   if (!useMockInbox && (!starknetCore || !l2UnlockVerifier)) {

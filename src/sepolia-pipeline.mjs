@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { ethers } from "ethers";
 import { mergeRecommendedTxOverrides } from "../shared/deploy/feeOverrides.mjs";
+import { getStableArtBackendManifestPath } from "../shared/deploy/artBackendManifest.mjs";
 import { waitForReceiptWithTimeout } from "../scripts/sepolia/txutil.mjs";
 
 import {
@@ -458,7 +459,7 @@ export async function registerCatalogToRegistry({ signer, registryAddress, manif
 }
 
 export function loadDeploymentAddresses() {
-  return readJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"), null);
+  return readJson(getStableArtBackendManifestPath(11155111), null);
 }
 
 export function uploadStatePath() {

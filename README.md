@@ -13,6 +13,13 @@ World / World ID is still not implemented here.
 No external World services are called.
 The active verifier bridge is still fact-registry-based.
 
+## Stable vs mutable infrastructure
+
+- Stable Sepolia trait/data infrastructure now lives in [`config/stable-art-backends/sepolia.json`](./config/stable-art-backends/sepolia.json).
+- That manifest is the intended reused base for `PhilSVGStorage`, `PhilLayerRegistry`, and `PhilNFT` on Sepolia.
+- Mutable identity/proof/account infrastructure still writes per-chain deployment manifests under `deployments/`, for example `stark_<chainId>.json` and `4337_<chainId>.json`.
+- Local helper runs reuse healthy local manifests when possible and only re-bootstrap the art backend when the local chain is fresh or the manifest is unhealthy.
+
 ## Active identity architecture
 
 - `PhilIdentityGate` is the provider-agnostic nullifier and replay gate.
@@ -60,7 +67,7 @@ Build a DEV/TEST mock-humanity bundle:
 ```bash
 npm run proofs:build-mock-bundle -- \
   --in fixtures/mock_humans.dev.json \
-  --out artifacts/proofs/mock-humanity-bundle.json \
+  --out generated/proofs/mock-humanity-bundle.json \
   --proofContext 13
 ```
 
@@ -69,7 +76,7 @@ Build the original local-credential bundle:
 ```bash
 npm run proofs:build-bundle -- \
   --in credentials.json \
-  --out artifacts/proofs/credential-bundle.json \
+  --out generated/proofs/credential-bundle.json \
   --proofContext 13
 ```
 
@@ -90,16 +97,25 @@ npm run local:mock-flow
 Helper script:
 
 ```bash
-bash scripts/run_local_e2e.sh up
+bash scripts/run_local_e2e.sh up --fresh
 ```
 
 That helper bootstraps:
 
 - local Hardhat chain
+- stable Node 22 runtime selection for local services
 - mock-humanity bundle
 - contract deployments
 - local prover
 - backend
+
+Useful helper commands:
+
+```bash
+bash scripts/run_local_e2e.sh status
+bash scripts/run_local_e2e.sh down
+bash scripts/run_local_e2e.sh clean
+```
 
 Then serve the static frontend:
 
@@ -119,6 +135,9 @@ Stop the helper-managed services:
 bash scripts/run_local_e2e.sh down
 ```
 
+The helper writes logs under `.local-dev/` and keeps reusable manifests under `deployments/`.
+Bundle artifacts now live under `generated/proofs/` so compile steps do not wipe them.
+
 For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md).
 
 ## Environment highlights
@@ -127,11 +146,14 @@ For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 - `HUMANITY_BUNDLE_PATH`
 - `CREDENTIAL_BUNDLE_PATH`
 - `MOCK_HUMANITY_BUNDLE_PATH`
+- `ART_BACKEND_MODE`
+- `ART_BACKEND_MANIFEST_PATH`
 - `PROOF_CONTEXT`
 - `FACT_REGISTRY`
 - `FACT_REGISTRY_OPERATOR_KEY`
 - `LOCAL_PROVER_HOST`
 - `LOCAL_PROVER_PORT`
+- `NODE_BIN`
 
 See [`.env.example`](./.env.example) for the full template.
 
@@ -147,5 +169,6 @@ node --test test/eligibility-proof.contract.test.mjs test/mock-humanity.contract
 
 - Architecture: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 - DEV runbook: [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
+- Project status: [`PROJECT_STATUS_REPORT.md`](./PROJECT_STATUS_REPORT.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)
 - Humanity-ready summary: [`HUMANITY_READY_SUMMARY.md`](./HUMANITY_READY_SUMMARY.md)

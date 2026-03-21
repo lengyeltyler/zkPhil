@@ -67,7 +67,7 @@ function resolveRequestProviderMode(input) {
 
 function buildScarbArguments(input) {
   const witness = resolveRequestWitness(input);
-  return prepareScarbInput({
+  const serializedInput = prepareScarbInput({
     secret: resolveRequestSecret(input),
     siblings: witness.siblings.map((value) => BigInt(value)),
     pathIndices: witness.pathIndices.map((value) => Number(value)),
@@ -79,7 +79,9 @@ function buildScarbArguments(input) {
     providerMode: resolveRequestProviderMode(input),
     identitySubject: input.identitySource?.value,
     mockHumanIdHash: input.mockHumanIdHash,
-  }).map((value) => BigInt(value).toString()).join(',');
+  }).map((value) => BigInt(value).toString());
+
+  return [String(serializedInput.length), ...serializedInput].join(',');
 }
 
 function parseProgramOutput(stdout) {
@@ -189,8 +191,12 @@ export async function generateLocalProofArtifact(options) {
 
   const outputValues = parseProgramOutput(stdout).map(normalizeFeltOutput);
   if (outputValues.length > 0) {
-    const [, ...publicOutputs] = outputValues;
     const expectedOutputs = proofPayload.outputs;
+    const expectedSerializedLength = expectedOutputs.length + 1;
+    const relevantOutputValues = outputValues.length > expectedSerializedLength
+      ? outputValues.slice(-expectedSerializedLength)
+      : outputValues;
+    const [, ...publicOutputs] = relevantOutputValues;
     if (publicOutputs.length !== expectedOutputs.length) {
       throw new Error(`Unexpected Cairo output length ${publicOutputs.length}, expected ${expectedOutputs.length}`);
     }

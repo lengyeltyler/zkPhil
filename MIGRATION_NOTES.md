@@ -23,6 +23,9 @@
 - `LOCAL_PROVER_MANIFEST`
 - `LOCAL_PROVER_ENABLE_PROVE`
 - `LOCAL_PROVER_ENABLE_VERIFY`
+- `ART_BACKEND_MODE`
+- `ART_BACKEND_MANIFEST_PATH`
+- `NODE_BIN`
 
 Legacy aliases such as `CONTEXT_ID`, `ELIGIBILITY_BUNDLE_PATH`, and `ELIGIBILITY_ROOT` are still tolerated in a few places as compatibility fallbacks.
 
@@ -49,7 +52,7 @@ Build the bundle:
 ```bash
 node scripts/proofs/build_mock_humanity_bundle.mjs \
   --in fixtures/mock_humans.dev.json \
-  --out artifacts/proofs/mock-humanity-bundle.json \
+  --out generated/proofs/mock-humanity-bundle.json \
   --proofContext 13
 ```
 
@@ -105,4 +108,5 @@ Contains:
 - Direct Ethereum-side verification of S-two proof artifacts is still not implemented here.
 - The active verifier bridge is still fact-registry-based.
 - World / World ID is still intentionally unimplemented.
-- The local helper bootstrap may still need retries on some environments during the large local deploy path.
+- The local helper now hardens retries/readiness, but full S-two proving is still the slowest surface in the dev loop.
+- Interactive shells pinned to Node 20 need the helper or an explicit `NODE_BIN`/`nvm use 22` to avoid backend native-module mismatches.

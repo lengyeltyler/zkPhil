@@ -63,7 +63,7 @@ async function main() {
   const proofContext = BigInt(args.proofContext || args.contextId || parsed.proofContext || parsed.contextId || 13n);
   const seed = args.seed || parsed.seed || 'zkphil-local-credential';
   const outFile = path.resolve(
-    args.out || path.join(ROOT_DIR, 'artifacts', 'proofs', 'credential-bundle.json')
+    args.out || path.join(ROOT_DIR, 'generated', 'proofs', 'credential-bundle.json')
   );
 
   const bundle = buildCredentialBundle({

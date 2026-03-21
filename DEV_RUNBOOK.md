@@ -25,7 +25,13 @@ cd server-ts && npm install && cd ..
 Bring up the local stack:
 
 ```bash
-bash scripts/run_local_e2e.sh up
+bash scripts/run_local_e2e.sh up --fresh
+```
+
+Check readiness:
+
+```bash
+bash scripts/run_local_e2e.sh status
 ```
 
 Serve the frontend:
@@ -52,6 +58,12 @@ Stop helper-managed services:
 bash scripts/run_local_e2e.sh down
 ```
 
+Notes:
+
+- The helper auto-selects a Node 22 runtime when the interactive shell is pinned to an older Node.
+- Stable proof bundles are written to `generated/proofs/`, not `artifacts/`, so Solidity compile steps do not erase them.
+- Helper logs live under `.local-dev/`.
+
 ## Option B: explicit manual bootstrap
 
 ### 1. Build the mock-humanity bundle
@@ -59,9 +71,11 @@ bash scripts/run_local_e2e.sh down
 ```bash
 node scripts/proofs/build_mock_humanity_bundle.mjs \
   --in fixtures/mock_humans.dev.json \
-  --out artifacts/proofs/mock-humanity-bundle.json \
+  --out generated/proofs/mock-humanity-bundle.json \
   --proofContext 13
 ```
+
+Before running manual commands, make sure `node -v` is `v22.x` or set `NODE_BIN` to a Node 22 binary.
 
 ### 2. Start the local chain
 
@@ -87,8 +101,10 @@ export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f
 export PROGRAM_HASH=0x4444444444444444444444444444444444444444444444444444444444444444
 export PROOF_CONTEXT=13
 export HUMANITY_PROVIDER=mock
-export MOCK_HUMANITY_BUNDLE_PATH=./artifacts/proofs/mock-humanity-bundle.json
+export MOCK_HUMANITY_BUNDLE_PATH=./generated/proofs/mock-humanity-bundle.json
 export FACT_REGISTRY_OPERATOR_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+export ART_BACKEND_MODE=deploy-local
+export ART_BACKEND_MANIFEST_PATH=./deployments/art_31337.json
 node scripts/deploy_stark.mjs
 ```
 
@@ -130,7 +146,7 @@ export FACT_REGISTRY_OPERATOR_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed
 export PROGRAM_HASH=0x4444444444444444444444444444444444444444444444444444444444444444
 export PROOF_CONTEXT=13
 export HUMANITY_PROVIDER=mock
-export MOCK_HUMANITY_BUNDLE_PATH=../artifacts/proofs/mock-humanity-bundle.json
+export MOCK_HUMANITY_BUNDLE_PATH=../generated/proofs/mock-humanity-bundle.json
 export DATABASE_PATH=../server-ts/data/mock-humanity.local.db
 export ALLOW_LOOPBACK_ORIGINS=true
 npx tsx src/index.ts
@@ -208,6 +224,9 @@ node --test \
   test/verify-sepolia-bindings.test.mjs
 ```
 
-## Known limitation
+## Reuse notes
 
-The heavy local `deploy_stark` bootstrap can still need a retry on some environments if the local RPC drops during the large art-backend deployment sequence.
+- Stable Sepolia trait/data addresses are tracked in `config/stable-art-backends/sepolia.json`.
+- Local helper runs write mutable manifests under `deployments/art_31337.json`, `deployments/stark_31337.json`, and `deployments/4337_31337.json`.
+- `ART_BACKEND_MODE=reuse-existing-data` reuses a healthy local art manifest.
+- `ART_BACKEND_MODE=reuse-stable` is intended for stable public-chain trait/data reuse.

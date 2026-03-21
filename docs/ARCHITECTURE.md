@@ -10,6 +10,25 @@ zkPhil now has a provider-aware humanity architecture with a shared gate:
 - Cairo + S-two remain the proving layer.
 - the backend is a request-preparation helper, not the authorization root.
 
+## Infrastructure split
+
+Stable, reused infrastructure:
+
+- Sepolia trait/data contracts live in [`config/stable-art-backends/sepolia.json`](../config/stable-art-backends/sepolia.json).
+- Those stable addresses are the intended reuse base for `PhilSVGStorage`, `PhilLayerRegistry`, and `PhilNFT`.
+
+Mutable, redeployable infrastructure:
+
+- provider-aware identity core manifests live under `deployments/stark_<chainId>.json`
+- 4337/account manifests live under `deployments/4337_<chainId>.json`
+- local art bootstrap manifests live under `deployments/art_<chainId>.json`
+
+Deployment modes:
+
+- `ART_BACKEND_MODE=reuse-stable` for public-chain reuse of stable art/data infrastructure
+- `ART_BACKEND_MODE=reuse-existing-data` for local manifest reuse
+- `ART_BACKEND_MODE=deploy-local` for a fresh local art bootstrap
+
 ## Provider modes
 
 ### `HUMANITY_PROVIDER=local-credential`
@@ -102,7 +121,7 @@ The output shape stays stable so the fact-registry bridge does not change.
 1. The user authenticates with the backend.
 2. The frontend exposes available mock humans from backend status / eligibility.
 3. `request-mint` or account-create action request returns a provider-aware proving request.
-4. The local prover executes the Cairo program and emits `zkphil-stwo-proof-artifact-v3`.
+4. The local prover serializes the Cairo input as an outer `Array<felt252>`, executes locally, and emits `zkphil-stwo-proof-artifact-v3`.
 5. `/register-proof` registers the resulting fact in the local `DevProofVerifier`.
 6. `MockHumanityVerifier` checks the registered fact.
 7. `PhilIdentityGate` consumes the identity nullifier.
@@ -122,6 +141,12 @@ Retained:
 - deterministic `mintTo` binding
 - fact-registry bridge verification
 - onchain nullifier consumption
+
+Dev helper behavior:
+
+- `scripts/run_local_e2e.sh` now performs readiness checks for RPC, prover, backend, Stark core, 4337, and the art backend
+- local helper runs pin Node 22 for backend/prover/bootstrap work even when the interactive shell defaults to an older Node
+- proof bundles live under `generated/proofs/` so compiler output cleanup does not erase them
 
 ## Current limitations
 

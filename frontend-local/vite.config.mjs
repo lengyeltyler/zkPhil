@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { getStableArtBackendManifestPath } from '../shared/deploy/artBackendManifest.mjs';
+
 const ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(ROOT_DIR, '..');
 
@@ -17,7 +19,8 @@ function readJson(relativePath) {
 }
 
 const starkDeployment = readJson('deployments/stark_11155111.json');
-const sepoliaArtDeployment = readJson('deployments/sepolia-addresses.json');
+const stableArtPath = path.relative(REPO_ROOT, getStableArtBackendManifestPath(11155111));
+const sepoliaArtDeployment = readJson(stableArtPath);
 const previewConfig = {
   chainId: 11155111,
   philTestMintAddress: starkDeployment?.PhilTestMint || '',

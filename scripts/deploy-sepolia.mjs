@@ -8,6 +8,7 @@ import {
 } from "../src/contracts.mjs";
 import { buildLayerCatalog } from "../src/layer-catalog.mjs";
 import { registerCatalogToRegistry, uploadCatalogToStorage } from "../src/sepolia-pipeline.mjs";
+import { getStableArtBackendManifestPath } from "../shared/deploy/artBackendManifest.mjs";
 import {
   DEPLOYMENTS_DIR,
   LAYER_CATALOG_PATH,
@@ -28,7 +29,9 @@ if (Number(network.chainId) !== 11155111) {
 const catalog = buildLayerCatalog();
 writeJson(LAYER_CATALOG_PATH, catalog);
 
-const existingAddresses = readJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"), null);
+const stableArtManifestPath = getStableArtBackendManifestPath(network.chainId);
+const existingAddresses = readJson(stableArtManifestPath, null)
+  || readJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"), null);
 const requestedSvgStorage = String(
   process.env.PHIL_SVG_STORAGE || existingAddresses?.contracts?.svgStorage || ""
 ).trim();
@@ -98,7 +101,11 @@ const addresses = {
   }
 };
 
-writeJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"), addresses);
+writeJson(stableArtManifestPath, {
+  ...addresses,
+  stable: true,
+  source: "Stable Sepolia trait/data infrastructure reused by mutable zkPhil identity deployments."
+});
 writeFrontendContractsConfig(addresses);
 
 console.log(JSON.stringify(addresses, null, 2));

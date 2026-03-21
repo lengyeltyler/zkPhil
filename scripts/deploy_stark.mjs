@@ -20,6 +20,8 @@
  *   VERIFIER_CONFIG_HASH      - Humanity verifier config hash (or set CREDENTIAL_BUNDLE_PATH)
  *   CREDENTIAL_BUNDLE_PATH    - Path to a generated credential bundle; deploy uses its verifier config hash
  *   MOCK_HUMANITY_BUNDLE_PATH - Path to a generated mock-humanity bundle for HUMANITY_PROVIDER=mock
+ *   ART_BACKEND_MODE          - auto (default), reuse-existing-data, reuse-stable, deploy-local, explicit
+ *   ART_BACKEND_MANIFEST_PATH - Optional art backend manifest path for reuse/deploy bookkeeping
  *   PHIL_SVG_STORAGE          - Optional existing PhilSVGStorage address
  *   PHIL_LAYER_REGISTRY       - Optional existing PhilLayerRegistry address
  *   REUSE_STARK_DEPLOYMENTS   - Reuse deployments/stark_<chainId>.json instead of redeploying
@@ -34,6 +36,7 @@ import { fileURLToPath } from 'url';
 
 import { deployPhilSystem } from './local/deployPhilSystem.mjs';
 import { DEFAULT_DRY_RUN_PRIVATE_KEY, isDryRunEnabled, isTruthy } from '../shared/deploy/dryRun.mjs';
+import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -102,6 +105,8 @@ export function readDeployStarkConfig(env = process.env) {
     verifierConfigHash: String(env.VERIFIER_CONFIG_HASH || env.ELIGIBILITY_ROOT || '').trim(),
     credentialBundlePath: String(env.CREDENTIAL_BUNDLE_PATH || env.ELIGIBILITY_BUNDLE_PATH || '').trim(),
     mockHumanityBundlePath: String(env.MOCK_HUMANITY_BUNDLE_PATH || env.HUMANITY_BUNDLE_PATH || '').trim(),
+    artBackendMode: String(env.ART_BACKEND_MODE || '').trim(),
+    artBackendManifestPath: String(env.ART_BACKEND_MANIFEST_PATH || '').trim(),
     dryRun,
     reuseStark:
       !isTruthy(env.FORCE_REDEPLOY) &&
@@ -113,9 +118,14 @@ export function readDeployStarkConfig(env = process.env) {
 }
 
 export async function runDeployStark(config = readDeployStarkConfig(process.env)) {
-  const provider = new ethers.JsonRpcProvider(config.rpcUrl, undefined, { batchMaxCount: 1 });
-  const network = await provider.getNetwork();
-  const connectedChainId = Number(network.chainId);
+  const provider = new ethers.JsonRpcProvider(
+    config.rpcUrl,
+    config.configuredChainId,
+    { batchMaxCount: 1, staticNetwork: true }
+  );
+  const connectedChainId = Number(
+    BigInt(await withRpcRetry('ping deployment rpc', () => provider.send('eth_chainId', [])))
+  );
   if (connectedChainId !== config.configuredChainId) {
     throw new Error(
       `RPC chain mismatch. Connected chainId=${connectedChainId}, expected ${config.configuredChainId}.`
@@ -165,6 +175,12 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
   if (config.mockHumanityBundlePath) {
     console.log(`Mock Humanity Bundle: ${config.mockHumanityBundlePath}`);
   }
+  if (config.artBackendMode) {
+    console.log(`Art Backend Mode: ${config.artBackendMode}`);
+  }
+  if (config.artBackendManifestPath) {
+    console.log(`Art Backend Manifest: ${config.artBackendManifestPath}`);
+  }
   console.log('Proof Mode:   Local Cairo + S-two proof facts');
   console.log('Fact Bridge:  DevProofVerifier (31337) / external FACT_REGISTRY (public chains)');
   console.log('='.repeat(60) + '\n');
@@ -179,8 +195,11 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
     verifierConfigHash: config.verifierConfigHash,
     credentialBundlePath: config.credentialBundlePath,
     mockHumanityBundlePath: config.mockHumanityBundlePath,
+    artBackendMode: config.artBackendMode,
+    artBackendManifestPath: config.artBackendManifestPath,
     svgStorageAddress: config.svgStorageAddress,
     layerRegistryAddress: config.layerRegistryAddress,
+    chainIdHint: config.configuredChainId,
     writeDeployments: !config.dryRun,
     dryRun: config.dryRun,
     dryRunPlanner: config.dryRunPlanner,
@@ -205,6 +224,8 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
     factRegistry: deployments.factRegistry,
     verifierConfigHash: deployments.verifierConfigHash,
     artBackendReused: deployments.artBackendReused,
+    artBackendMode: deployments.artBackendMode,
+    artBackendManifest: deployments.artBackendManifest,
     artBackendSource: deployments.artBackendSource,
     ProofMode: 'LOCAL_STWO_FACTS',
   };

@@ -15,12 +15,24 @@ import {
 } from '../../shared/proof/localStarkProver.mjs';
 import { logTx, waitForReceiptWithTimeout } from '../sepolia/txutil.mjs';
 import {
+  ART_BACKEND_MODE_DEPLOY_LOCAL,
+  ART_BACKEND_MODE_EXPLICIT,
+  ART_BACKEND_MODE_REUSE_EXISTING,
+  ART_BACKEND_MODE_REUSE_STABLE,
+  LOCAL_CHAIN_ID,
+  normalizeArtBackendMode,
+  readArtBackendManifest,
+  inspectArtBackendDeployment,
+  writeArtBackendManifest,
+} from '../../shared/deploy/artBackendManifest.mjs';
+import {
   DryRunPlanner,
   installDryRunGuards,
   planContractCall,
   planDeploy,
 } from '../../shared/deploy/dryRun.mjs';
 import { mergeRecommendedTxOverrides } from '../../shared/deploy/feeOverrides.mjs';
+import { formatRpcError, withRpcRetry } from '../../shared/deploy/rpcRetry.mjs';
 import { compilePhilContracts } from './compileContracts.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,13 +40,7 @@ const ROOT_DIR = path.resolve(__dirname, '..', '..');
 
 const DEFAULT_PRIVATE_KEY =
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-const LOCAL_CHAIN_ID = 31337;
 const SEPOLIA_CHAIN_ID = 11155111;
-const SMALL_BATCH_MAX_ITEMS = 20;
-const SMALL_BATCH_MAX_BYTES = 120_000;
-const REGISTER_ASSET_BATCH_SIZE = 40;
-const REGISTER_VARIANT_BATCH_SIZE = 20;
-const SEPOLIA_ADDRESSES_PATH = path.join(ROOT_DIR, 'deployments', 'sepolia-addresses.json');
 const ZK_PHIL_LAYERS_DIR = path.join(ROOT_DIR, 'zkPhilLayers');
 
 function normalizeHumanityProviderMode(rawValue) {
@@ -88,6 +94,53 @@ function chunkArray(items, chunkSize) {
   return chunks;
 }
 
+function readPositiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveArtBackendBatchConfig(chainId, env = process.env) {
+  const isLocalChain = Number(chainId) === LOCAL_CHAIN_ID;
+  return {
+    smallBatchMaxItems: readPositiveInt(
+      env.ART_BACKEND_SMALL_BATCH_MAX_ITEMS,
+      isLocalChain ? 8 : 20
+    ),
+    smallBatchMaxBytes: readPositiveInt(
+      env.ART_BACKEND_SMALL_BATCH_MAX_BYTES,
+      isLocalChain ? SVG_SINGLE_UPLOAD_LIMIT : 120_000
+    ),
+    registerAssetBatchSize: readPositiveInt(
+      env.ART_BACKEND_REGISTER_ASSET_BATCH_SIZE,
+      isLocalChain ? 12 : 40
+    ),
+    registerVariantBatchSize: readPositiveInt(
+      env.ART_BACKEND_REGISTER_VARIANT_BATCH_SIZE,
+      isLocalChain ? 10 : 20
+    ),
+    chunkAppendBatchSize: readPositiveInt(
+      env.ART_BACKEND_CHUNK_APPEND_BATCH_SIZE,
+      isLocalChain ? 1 : 4
+    ),
+  };
+}
+
+export function shouldFlushSmallSvgBatch({
+  pendingCount,
+  pendingBytes,
+  nextAssetSize,
+  batchConfig,
+}) {
+  if (pendingCount === 0) {
+    return false;
+  }
+
+  return (
+    pendingCount + 1 > batchConfig.smallBatchMaxItems ||
+    pendingBytes + nextAssetSize > batchConfig.smallBatchMaxBytes
+  );
+}
+
 async function deployContract({
   wallet,
   provider,
@@ -114,7 +167,20 @@ async function deployContract({
   }
 
   const factory = new ethers.ContractFactory(artifact.abi, artifact.bytecode, wallet);
-  const contract = await factory.deploy(...args, await mergeRecommendedTxOverrides(provider));
+  const txOverrides = await withRpcRetry(
+    `${contractName}: resolve tx overrides`,
+    () => mergeRecommendedTxOverrides(provider)
+  );
+  const contract = await withRpcRetry(
+    `deploy ${contractName}`,
+    () => factory.deploy(...args, txOverrides),
+    {
+      onRetry: ({ delayMs, reason }) => {
+        console.warn(`Deploy ${contractName} hit a transient RPC error: ${reason}`);
+        console.warn(`Retrying ${contractName} deployment in ${delayMs}ms...`);
+      },
+    }
+  );
   const deploymentTx = contract.deploymentTransaction();
   if (!deploymentTx) {
     throw new Error(`Missing deployment transaction for ${contractName}`);
@@ -164,36 +230,33 @@ async function callContract({
 
   const contract = new ethers.Contract(contractAddress, abi, wallet);
   const overrideKeys = Object.keys(overrides).filter((key) => overrides[key] != null);
-  const effectiveOverrides = await mergeRecommendedTxOverrides(provider, overrides);
+  const effectiveOverrides = await withRpcRetry(
+    `${contractName}.${method}: resolve tx overrides`,
+    () => mergeRecommendedTxOverrides(provider, overrides)
+  );
   const effectiveOverrideKeys = Object.keys(effectiveOverrides).filter(
     (key) => effectiveOverrides[key] != null
   );
   const txArgs = effectiveOverrideKeys.length > 0 ? [...args, effectiveOverrides] : args;
-  const tx = await contract[method](...txArgs);
+  const tx = await withRpcRetry(
+    `${contractName}.${method}`,
+    () => contract[method](...txArgs),
+    {
+      onRetry: ({ delayMs, reason }) => {
+        console.warn(`${contractName}.${method} hit a transient RPC error: ${reason}`);
+        console.warn(`Retrying ${contractName}.${method} in ${delayMs}ms...`);
+      },
+    }
+  );
   logTx(`${contractName}.${method}`, tx.hash);
   await waitForReceiptWithTimeout(provider, tx.hash);
   return tx;
 }
 
-function loadSepoliaArtBackend() {
-  const manifest = readJson(SEPOLIA_ADDRESSES_PATH);
-  if (!manifest?.contracts?.svgStorage || !manifest?.contracts?.layerRegistry) {
-    return null;
-  }
-
-  return {
-    svgStorage: ethers.getAddress(manifest.contracts.svgStorage),
-    layerRegistry: ethers.getAddress(manifest.contracts.layerRegistry),
-    philNft: manifest.contracts.philNft
-      ? ethers.getAddress(manifest.contracts.philNft)
-      : '',
-    manifest,
-  };
-}
-
 async function bootstrapArtBackend({
   wallet,
   provider,
+  chainId,
   svgStorageAddress,
   layerRegistryAddress,
   storageArtifact,
@@ -202,21 +265,33 @@ async function bootstrapArtBackend({
   dryRunPlanner,
   from,
 }) {
+  const batchConfig = resolveArtBackendBatchConfig(chainId);
   const catalog = buildLayerCatalog();
   const manifest = {
     generatedAt: new Date().toISOString(),
     network: dryRun ? 'dry-run' : 'local',
-    chainId: Number((await provider.getNetwork()).chainId),
+    chainId: Number(chainId),
     svgStorage: svgStorageAddress,
     layerRegistry: layerRegistryAddress,
     totalFiles: catalog.assets.length,
     totalSvgBytes: catalog.totals.totalSvgBytes,
     files: {},
   };
+  console.log(
+    `[art] Bootstrapping ${catalog.assets.length} SVGs (${catalog.totals.totalSvgBytes} bytes) ` +
+    `with smallBatchMaxItems=${batchConfig.smallBatchMaxItems}, ` +
+    `smallBatchMaxBytes=${batchConfig.smallBatchMaxBytes}, ` +
+    `registerAssetBatchSize=${batchConfig.registerAssetBatchSize}, ` +
+    `registerVariantBatchSize=${batchConfig.registerVariantBatchSize}, ` +
+    `chunkAppendBatchSize=${batchConfig.chunkAppendBatchSize}`
+  );
 
-  let nextSvgId = 1;
+  const storageReader = new ethers.Contract(svgStorageAddress, storageArtifact.abi, provider);
+  let syntheticNextSvgId = 1;
   const pendingSmallBatch = [];
   let pendingSmallBatchBytes = 0;
+  let storedSmallBatchCount = 0;
+  let chunkedSvgCount = 0;
 
   async function flushSmallBatch() {
     if (pendingSmallBatch.length === 0) {
@@ -224,29 +299,51 @@ async function bootstrapArtBackend({
     }
 
     const batch = [...pendingSmallBatch];
-    const startingSvgId = nextSvgId;
-    nextSvgId += batch.length;
+    const batchBytes = pendingSmallBatchBytes;
+    const batchPaths = batch.map((entry) => entry.asset.relativePath);
+    const predictedSvgIds = dryRun
+      ? batch.map(() => syntheticNextSvgId++)
+      : (
+        await withRpcRetry(
+          'PhilSVGStorage.storeSvgBatch.staticCall',
+          () => storageReader.storeSvgBatch.staticCall(batch.map((entry) => entry.fileBytes))
+        )
+      ).map((value) => Number(value));
+    storedSmallBatchCount += 1;
 
-    await callContract({
-      wallet,
-      provider,
-      contractName: 'PhilSVGStorage',
-      contractAddress: svgStorageAddress,
-      abi: storageArtifact.abi,
-      method: 'storeSvgBatch',
-      args: [batch.map((entry) => entry.fileBytes)],
-      dryRun,
-      dryRunPlanner,
-      from,
-      predictedResult: `svgIds ${startingSvgId}-${nextSvgId - 1}`,
-      canEstimate: false,
-      note: dryRun
-        ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
-        : '',
-    });
+    console.log(
+      `[art] storeSvgBatch #${storedSmallBatchCount}: ${batch.length} SVGs, ` +
+      `${batchBytes} bytes, predictedIds ${predictedSvgIds.join(',')}`
+    );
+
+    try {
+      await callContract({
+        wallet,
+        provider,
+        contractName: 'PhilSVGStorage',
+        contractAddress: svgStorageAddress,
+        abi: storageArtifact.abi,
+        method: 'storeSvgBatch',
+        args: [batch.map((entry) => entry.fileBytes)],
+        dryRun,
+        dryRunPlanner,
+        from,
+        predictedResult: `svgIds ${predictedSvgIds.join(',')}`,
+        canEstimate: false,
+        note: dryRun
+          ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
+          : '',
+      });
+    } catch (error) {
+      throw new Error(
+        `PhilSVGStorage.storeSvgBatch failed for ${batch.length} SVGs ` +
+          `(${batchBytes} bytes): ${batchPaths.join(', ')}`,
+        { cause: error }
+      );
+    }
 
     for (let index = 0; index < batch.length; index++) {
-      const svgId = startingSvgId + index;
+      const svgId = predictedSvgIds[index];
       const entry = batch[index];
       manifest.files[entry.asset.relativePath] = {
         fileName: entry.asset.fileName,
@@ -267,12 +364,23 @@ async function bootstrapArtBackend({
     const fileBytes = readSvgBytes(asset.relativePath);
 
     if (asset.sizeBytes <= SVG_SINGLE_UPLOAD_LIMIT) {
+      if (
+        shouldFlushSmallSvgBatch({
+          pendingCount: pendingSmallBatch.length,
+          pendingBytes: pendingSmallBatchBytes,
+          nextAssetSize: asset.sizeBytes,
+          batchConfig,
+        })
+      ) {
+        await flushSmallBatch();
+      }
+
       pendingSmallBatch.push({ asset, fileBytes });
       pendingSmallBatchBytes += asset.sizeBytes;
 
       if (
-        pendingSmallBatch.length >= SMALL_BATCH_MAX_ITEMS ||
-        pendingSmallBatchBytes >= SMALL_BATCH_MAX_BYTES
+        pendingSmallBatch.length >= batchConfig.smallBatchMaxItems ||
+        pendingSmallBatchBytes >= batchConfig.smallBatchMaxBytes
       ) {
         await flushSmallBatch();
       }
@@ -282,69 +390,136 @@ async function bootstrapArtBackend({
 
     await flushSmallBatch();
 
-    const svgId = nextSvgId;
-    nextSvgId += 1;
     const chunks = chunkBuffer(fileBytes);
     const contentHash = ethers.keccak256(fileBytes);
+    const predictedSvgId = dryRun
+      ? syntheticNextSvgId++
+      : Number(
+        await withRpcRetry(
+          'PhilSVGStorage.initializeChunkedSvg.staticCall',
+          () => storageReader.initializeChunkedSvg.staticCall(asset.sizeBytes, contentHash, chunks.length)
+        )
+      );
+    chunkedSvgCount += 1;
 
-    await callContract({
-      wallet,
-      provider,
-      contractName: 'PhilSVGStorage',
-      contractAddress: svgStorageAddress,
-      abi: storageArtifact.abi,
-      method: 'initializeChunkedSvg',
-      args: [asset.sizeBytes, contentHash, chunks.length],
-      dryRun,
-      dryRunPlanner,
-      from,
-      predictedResult: `svgId ${svgId}`,
-      canEstimate: false,
-      note: dryRun
-        ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
-        : '',
-    });
+    console.log(
+      `[art] chunked SVG #${chunkedSvgCount}: ${asset.relativePath} ` +
+      `(${asset.sizeBytes} bytes, ${chunks.length} chunks) -> predictedId ${predictedSvgId}`
+    );
 
-    await callContract({
-      wallet,
-      provider,
-      contractName: 'PhilSVGStorage',
-      contractAddress: svgStorageAddress,
-      abi: storageArtifact.abi,
-      method: 'appendChunks',
-      args: [svgId, chunks],
-      dryRun,
-      dryRunPlanner,
-      from,
-      canEstimate: false,
-      note: dryRun
-        ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
-        : '',
-    });
+    try {
+      await callContract({
+        wallet,
+        provider,
+        contractName: 'PhilSVGStorage',
+        contractAddress: svgStorageAddress,
+        abi: storageArtifact.abi,
+        method: 'initializeChunkedSvg',
+        args: [asset.sizeBytes, contentHash, chunks.length],
+        dryRun,
+        dryRunPlanner,
+        from,
+        predictedResult: `svgId ${predictedSvgId}`,
+        canEstimate: false,
+        note: dryRun
+          ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
+          : '',
+      });
+    } catch (error) {
+      throw new Error(`initializeChunkedSvg failed for ${asset.relativePath}`, { cause: error });
+    }
 
-    await callContract({
-      wallet,
-      provider,
-      contractName: 'PhilSVGStorage',
-      contractAddress: svgStorageAddress,
-      abi: storageArtifact.abi,
-      method: 'finalizeChunkedSvg',
-      args: [svgId],
-      dryRun,
-      dryRunPlanner,
-      from,
-      canEstimate: false,
-      note: dryRun
-        ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
-        : '',
-    });
+    let existingChunkCount = 0;
+    let alreadyFinalized = false;
+    if (!dryRun) {
+      const [
+        ,
+        ,
+        ,
+        chunkCount,
+        finalized,
+      ] = await withRpcRetry(
+        `PhilSVGStorage.getRecord(${predictedSvgId})`,
+        () => storageReader.getRecord(predictedSvgId)
+      );
+      existingChunkCount = Number(chunkCount);
+      alreadyFinalized = Boolean(finalized);
+    }
+
+    if (!alreadyFinalized) {
+      const remainingChunks = chunks.slice(existingChunkCount);
+      if (remainingChunks.length > 0) {
+        const chunkGroups = chunkArray(
+          remainingChunks,
+          Math.max(1, batchConfig.chunkAppendBatchSize)
+        );
+
+        for (let index = 0; index < chunkGroups.length; index += 1) {
+          const chunkGroup = chunkGroups[index];
+          const method = chunkGroup.length === 1 ? 'appendChunk' : 'appendChunks';
+          const args = chunkGroup.length === 1
+            ? [predictedSvgId, chunkGroup[0]]
+            : [predictedSvgId, chunkGroup];
+
+          try {
+            await callContract({
+              wallet,
+              provider,
+              contractName: 'PhilSVGStorage',
+              contractAddress: svgStorageAddress,
+              abi: storageArtifact.abi,
+              method,
+              args,
+              dryRun,
+              dryRunPlanner,
+              from,
+              canEstimate: false,
+              note: dryRun
+                ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
+                : '',
+            });
+          } catch (error) {
+            throw new Error(
+              `${method} failed for ${asset.relativePath} (svgId ${predictedSvgId}, ` +
+                `chunk batch ${index + 1}/${chunkGroups.length})`,
+              { cause: error }
+            );
+          }
+        }
+      }
+
+      try {
+        await callContract({
+          wallet,
+          provider,
+          contractName: 'PhilSVGStorage',
+          contractAddress: svgStorageAddress,
+          abi: storageArtifact.abi,
+          method: 'finalizeChunkedSvg',
+          args: [predictedSvgId],
+          dryRun,
+          dryRunPlanner,
+          from,
+          canEstimate: false,
+          note: dryRun
+            ? 'Gas estimate is unavailable until PhilSVGStorage is actually deployed.'
+            : '',
+        });
+      } catch (error) {
+        throw new Error(`finalizeChunkedSvg failed for ${asset.relativePath} (svgId ${predictedSvgId})`, {
+          cause: error,
+        });
+      }
+    } else {
+      console.log(`[art] Reused finalized chunked SVG id ${predictedSvgId} for ${asset.relativePath}`);
+    }
 
     manifest.files[asset.relativePath] = {
       fileName: asset.fileName,
       relativePath: asset.relativePath,
       sizeBytes: asset.sizeBytes,
-      svgId,
-      storageRef: svgId,
+      svgId: predictedSvgId,
+      storageRef: predictedSvgId,
       chunked: true,
       chunkCount: chunks.length,
     };
@@ -387,13 +562,19 @@ async function bootstrapArtBackend({
         fileName: asset.fileName,
         _assetKey: asset.key,
       })),
-      REGISTER_ASSET_BATCH_SIZE
+      batchConfig.registerAssetBatchSize
     );
 
-    for (const assetChunk of assetChunks) {
+    for (let assetChunkIndex = 0; assetChunkIndex < assetChunks.length; assetChunkIndex += 1) {
+      const assetChunk = assetChunks[assetChunkIndex];
       if (assetChunk.length === 0) {
         continue;
       }
+
+      console.log(
+        `[art] registerAssets layer=${layer.name} chunk=${assetChunkIndex + 1}/${assetChunks.length} ` +
+        `count=${assetChunk.length} startingAssetId=${nextAssetId}`
+      );
 
       await callContract({
         wallet,
@@ -440,13 +621,19 @@ async function bootstrapArtBackend({
         assetIds: variant.assetKeys.map((assetKey) => assetIdByKey[assetKey]),
         _variantKey: variant.key,
       })),
-      REGISTER_VARIANT_BATCH_SIZE
+      batchConfig.registerVariantBatchSize
     );
 
-    for (const variantChunk of variantChunks) {
+    for (let variantChunkIndex = 0; variantChunkIndex < variantChunks.length; variantChunkIndex += 1) {
+      const variantChunk = variantChunks[variantChunkIndex];
       if (variantChunk.length === 0) {
         continue;
       }
+
+      console.log(
+        `[art] registerVariants layer=${layer.name} chunk=${variantChunkIndex + 1}/${variantChunks.length} ` +
+        `count=${variantChunk.length} startingVariantId=${nextVariantId}`
+      );
 
       await callContract({
         wallet,
@@ -486,6 +673,7 @@ async function bootstrapArtBackend({
     manifest,
     assetIdByKey,
     variantIdByKey,
+    batchConfig,
   };
 }
 
@@ -494,43 +682,96 @@ async function resolveArtBackend({
   wallet,
   provider,
   artifacts,
+  artBackendMode,
+  artBackendManifestPath,
   svgStorageAddress,
   layerRegistryAddress,
+  writeDeployments,
   dryRun,
   dryRunPlanner,
   from,
 }) {
-  if (svgStorageAddress || layerRegistryAddress) {
-    if (!svgStorageAddress || !layerRegistryAddress) {
-      throw new Error('Both svgStorageAddress and layerRegistryAddress must be supplied together.');
+  if ((svgStorageAddress || layerRegistryAddress) && (!svgStorageAddress || !layerRegistryAddress)) {
+    throw new Error('Both svgStorageAddress and layerRegistryAddress must be supplied together.');
+  }
+
+  const resolvedMode = normalizeArtBackendMode(artBackendMode, chainId, {
+    hasExplicitAddresses: Boolean(svgStorageAddress || layerRegistryAddress),
+  });
+
+  async function reuseManifest(mode, stablePreferred) {
+    const manifest = readArtBackendManifest({
+      chainId,
+      manifestPath: artBackendManifestPath,
+      stablePreferred,
+    });
+    if (!manifest) {
+      return null;
     }
 
+    if (!dryRun) {
+      const inspection = await withRpcRetry(
+        `inspect art backend ${manifest.filePath}`,
+        () => inspectArtBackendDeployment(provider, manifest)
+      );
+      if (!inspection.ok) {
+        if (mode !== ART_BACKEND_MODE_REUSE_EXISTING) {
+          throw new Error(
+            `Configured art backend manifest is missing on-chain code: ${inspection.missing.join(', ')}`
+          );
+        }
+        console.warn(
+          `[art] Existing manifest ${manifest.filePath} is stale: ${inspection.missing.join(', ')}. ` +
+          'Falling back to local art bootstrap.'
+        );
+        return null;
+      }
+    }
+
+    console.log(
+      `[art] Reusing ${stablePreferred ? 'stable' : 'existing'} art backend from ${manifest.filePath}`
+    );
+    return {
+      svgStorageAddress: manifest.svgStorageAddress,
+      layerRegistryAddress: manifest.layerRegistryAddress,
+      philNftAddress: manifest.philNftAddress,
+      reused: true,
+      source: manifest.filePath,
+      manifestPath: manifest.filePath,
+      bootstrap: null,
+      mode,
+    };
+  }
+
+  if (resolvedMode === ART_BACKEND_MODE_EXPLICIT) {
     return {
       svgStorageAddress: ethers.getAddress(svgStorageAddress),
       layerRegistryAddress: ethers.getAddress(layerRegistryAddress),
       philNftAddress: '',
       reused: true,
-      source: 'explicit',
+      source: 'explicit environment',
+      manifestPath: '',
       bootstrap: null,
+      mode: resolvedMode,
     };
   }
 
-  if (chainId === SEPOLIA_CHAIN_ID) {
-    const sepoliaArtBackend = loadSepoliaArtBackend();
-    if (!sepoliaArtBackend) {
+  if (resolvedMode === ART_BACKEND_MODE_REUSE_STABLE) {
+    const stable = await reuseManifest(resolvedMode, true);
+    if (!stable) {
       throw new Error(
-        'Missing deployments/sepolia-addresses.json. Sepolia hybrid deploy expects an existing art backend.'
+        `ART_BACKEND_MODE=${resolvedMode} requires a valid stable art backend manifest.`
       );
     }
+    return stable;
+  }
 
-    return {
-      svgStorageAddress: sepoliaArtBackend.svgStorage,
-      layerRegistryAddress: sepoliaArtBackend.layerRegistry,
-      philNftAddress: sepoliaArtBackend.philNft,
-      reused: true,
-      source: 'deployments/sepolia-addresses.json',
-      bootstrap: null,
-    };
+  if (resolvedMode === ART_BACKEND_MODE_REUSE_EXISTING) {
+    const existing = await reuseManifest(resolvedMode, false);
+    if (existing) {
+      return existing;
+    }
+    console.log('[art] No healthy reusable local art backend found; bootstrapping local art backend...');
   }
 
   const storageArtifact = getArtifact(artifacts, 'PhilSVGStorage');
@@ -561,6 +802,7 @@ async function resolveArtBackend({
   const bootstrap = await bootstrapArtBackend({
     wallet,
     provider,
+    chainId,
     svgStorageAddress: svgStorage.address,
     layerRegistryAddress: layerRegistry.address,
     storageArtifact,
@@ -570,19 +812,45 @@ async function resolveArtBackend({
     from,
   });
 
+  const bootstrapSummary = {
+    totalFiles: bootstrap.catalog.assets.length,
+    totalSvgBytes: bootstrap.catalog.totals.totalSvgBytes,
+    totalLayers: bootstrap.catalog.layers.length,
+    totalVariants: bootstrap.catalog.totals.variants,
+    totalAssets: bootstrap.catalog.assets.length,
+    batchConfig: bootstrap.batchConfig,
+  };
+  const manifestPath = (!dryRun && writeDeployments)
+    ? writeArtBackendManifest({
+      chainId,
+      manifestPath: artBackendManifestPath,
+      svgStorageAddress: svgStorage.address,
+      layerRegistryAddress: layerRegistry.address,
+      stable: false,
+      source: 'bootstrapped zkPhilLayers',
+      bootstrap: bootstrapSummary,
+    })
+    : '';
+  if (manifestPath) {
+    console.log(`[art] Saved art backend manifest: ${manifestPath}`);
+  }
+
   return {
     svgStorageAddress: svgStorage.address,
     layerRegistryAddress: layerRegistry.address,
     philNftAddress: '',
     reused: false,
     source: 'bootstrapped zkPhilLayers',
+    manifestPath,
     bootstrap,
+    mode: ART_BACKEND_MODE_DEPLOY_LOCAL,
   };
 }
 
 export async function deployPhilSystem({
   rpcUrl = 'http://127.0.0.1:8545',
   privateKey = process.env.PRIVATE_KEY || DEFAULT_PRIVATE_KEY,
+  chainIdHint = Number(process.env.CHAIN_ID || '0') || undefined,
   programHash = process.env.PROGRAM_HASH ||
     '0x4444444444444444444444444444444444444444444444444444444444444444',
   proofContext = BigInt(process.env.PROOF_CONTEXT || process.env.CONTEXT_ID || '13'),
@@ -591,13 +859,17 @@ export async function deployPhilSystem({
   humanityProvider = process.env.HUMANITY_PROVIDER || HUMANITY_PROVIDER_LOCAL_CREDENTIAL,
   credentialBundlePath = process.env.CREDENTIAL_BUNDLE_PATH || process.env.ELIGIBILITY_BUNDLE_PATH || '',
   mockHumanityBundlePath = process.env.MOCK_HUMANITY_BUNDLE_PATH || process.env.HUMANITY_BUNDLE_PATH || '',
+  artBackendMode = process.env.ART_BACKEND_MODE || '',
+  artBackendManifestPath = process.env.ART_BACKEND_MANIFEST_PATH || '',
   svgStorageAddress = process.env.PHIL_SVG_STORAGE || '',
   layerRegistryAddress = process.env.PHIL_LAYER_REGISTRY || '',
   writeDeployments = true,
   dryRun = false,
   dryRunPlanner = null,
 }) {
-  const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { batchMaxCount: 1 });
+  const provider = chainIdHint
+    ? new ethers.JsonRpcProvider(rpcUrl, chainIdHint, { batchMaxCount: 1, staticNetwork: true })
+    : new ethers.JsonRpcProvider(rpcUrl, undefined, { batchMaxCount: 1 });
   const rawWallet = new ethers.Wallet(privateKey, provider);
   const wallet = new ethers.NonceManager(rawWallet);
   const deployer = await rawWallet.getAddress();
@@ -610,8 +882,9 @@ export async function deployPhilSystem({
     ? (dryRunPlanner || await DryRunPlanner.create({ provider, from: deployer }))
     : null;
 
-  const chain = await provider.getNetwork();
-  const chainId = Number(chain.chainId);
+  const chainId = Number(
+    BigInt(await withRpcRetry('ping local deployment rpc', () => provider.send('eth_chainId', [])))
+  );
   if (!dryRun && chainId === 1) {
     const normalizedPrivateKey = String(privateKey || '').toLowerCase();
     if (!normalizedPrivateKey || normalizedPrivateKey === DEFAULT_PRIVATE_KEY) {
@@ -634,8 +907,11 @@ export async function deployPhilSystem({
     wallet,
     provider,
     artifacts,
+    artBackendMode,
+    artBackendManifestPath,
     svgStorageAddress,
     layerRegistryAddress,
+    writeDeployments,
     dryRun,
     dryRunPlanner: planner,
     from: deployer,
@@ -673,7 +949,9 @@ export async function deployPhilSystem({
     );
   })();
 
-  const nextEoaNonce = dryRun ? planner.nextNonce : Number(await wallet.getNonce());
+  const nextEoaNonce = dryRun
+    ? planner.nextNonce
+    : Number(await withRpcRetry('load deployer nonce', () => wallet.getNonce()));
   const needsDevRegistryDeploy = !factRegistryAddress;
   const futureMintAddress = ethers.getCreateAddress({
     from: deployer,
@@ -790,6 +1068,8 @@ export async function deployPhilSystem({
     PhilIdentityMint: mint.address,
     PhilWeb3: web3.address,
     artBackendReused: artBackend.reused,
+    artBackendMode: artBackend.mode,
+    artBackendManifest: artBackend.manifestPath || '',
     artBackendSource: artBackend.source,
     catalogTotals: artBackend.bootstrap
       ? artBackend.bootstrap.catalog.totals
