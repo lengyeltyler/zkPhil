@@ -1,23 +1,18 @@
 import dotenv from 'dotenv';
 import { ethers } from 'ethers';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
+import {
+  MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+  MUTABLE_STACK_IDENTITY_PROOF,
+  readMutableStackManifest,
+} from '../shared/deploy/mutableStackManifest.mjs';
 
 const DEFAULT_CHAIN_ID = 11155111;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
-
-function readDeployment(prefix, chainId, rootDir = ROOT_DIR) {
-  const manifestPath = path.join(rootDir, 'deployments', `${prefix}_${chainId}.json`);
-  if (!fs.existsSync(manifestPath)) {
-    return null;
-  }
-
-  return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-}
 
 function requireAddress(label, value) {
   const trimmed = String(value || '').trim();
@@ -84,8 +79,16 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
     throw new Error('CHAIN_ID must be an integer.');
   }
 
-  const starkDeployment = readDeployment('stark', configuredChainId, rootDir) || {};
-  const aaDeployment = readDeployment('4337', configuredChainId, rootDir) || {};
+  const starkDeployment = readMutableStackManifest({
+    stack: MUTABLE_STACK_IDENTITY_PROOF,
+    chainId: configuredChainId,
+    rootDir,
+  });
+  const aaDeployment = readMutableStackManifest({
+    stack: MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+    chainId: configuredChainId,
+    rootDir,
+  });
 
   return {
     rpcUrl,
@@ -93,34 +96,41 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
     proofGateAddress: requireAddress(
       'PROOF_GATE',
       env.PROOF_GATE ||
-        starkDeployment.PhilIdentityGate ||
-        starkDeployment.ProofGate ||
-        aaDeployment.PhilIdentityGate
+        starkDeployment.components.PhilIdentityGate ||
+        aaDeployment.dependencies.PhilIdentityGate
     ),
     philIdentityMintAddress: requireAddress(
       'PHIL_IDENTITY_MINT',
-      env.PHIL_IDENTITY_MINT || starkDeployment.PhilIdentityMint || aaDeployment.PhilIdentityMint
+      env.PHIL_IDENTITY_MINT ||
+        starkDeployment.components.PhilIdentityMint ||
+        aaDeployment.dependencies.PhilIdentityMint
     ),
     philAccountFactoryAddress: requireAddress(
       'PHIL_ACCOUNT_FACTORY',
-      env.PHIL_ACCOUNT_FACTORY || aaDeployment.PhilAccountFactory
+      env.PHIL_ACCOUNT_FACTORY || aaDeployment.components.PhilAccountFactory
     ),
     paymasterAddress: requireAddress(
       'PHIL_PAYMASTER',
-      env.PHIL_PAYMASTER || aaDeployment.PhilPaymaster
+      env.PHIL_PAYMASTER || aaDeployment.components.PhilPaymaster
     ),
     factRegistryAddress: requireAddress(
       'FACT_REGISTRY',
-      env.FACT_REGISTRY || starkDeployment.factRegistry
+      env.FACT_REGISTRY || starkDeployment.dependencies.factRegistry
     ),
     paymasterSignerAddress: resolveSignerAddress(env, {
       label: 'PhilPaymaster.verifyingSigner()',
       addressEnvKey: 'PAYMASTER_SIGNER',
       privateKeyEnvKey: 'PAYMASTER_SIGNER_KEY',
-      fallbackAddress: '',
+      fallbackAddress: aaDeployment.config.paymasterSigner || '',
     }),
-    starknetCoreAddress: requireAddress('STARKNET_CORE', env.STARKNET_CORE),
-    l2UnlockVerifier: requireUint256('L2_UNLOCK_VERIFIER', env.L2_UNLOCK_VERIFIER),
+    starknetCoreAddress: requireAddress(
+      'STARKNET_CORE',
+      env.STARKNET_CORE || aaDeployment.config.starknetCore
+    ),
+    l2UnlockVerifier: requireUint256(
+      'L2_UNLOCK_VERIFIER',
+      env.L2_UNLOCK_VERIFIER || aaDeployment.config.l2UnlockVerifier
+    ),
   };
 }
 

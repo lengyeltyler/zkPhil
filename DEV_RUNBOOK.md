@@ -263,8 +263,25 @@ Use:
 npm run status:sepolia
 ```
 
+This reports:
+
+- stable reused art/data from `config/stable-art-backends/sepolia.json`
+- mutable identity/proof state from `deployments/stark_11155111.json`
+- mutable 4337/account state from `deployments/4337_11155111.json`
+- whether a mutable manifest is `complete`, `partial`, `missing`, or `placeholder-configured`
+- whether current values are coming from explicit env or mutable-manifest fallback
+- any legacy alias usage or stale fields still present in older manifests
+
 For strict live verification with a usable Sepolia RPC and signer config:
 
 ```bash
 npm run verify:sepolia
 ```
+
+`verify:sepolia` fails closed if the mutable Sepolia manifests and/or explicit env still do not provide:
+
+- `PHIL_ACCOUNT_FACTORY`
+- `PHIL_PAYMASTER`
+- `PAYMASTER_SIGNER` or `PAYMASTER_SIGNER_KEY`
+- `STARKNET_CORE`
+- `L2_UNLOCK_VERIFIER`

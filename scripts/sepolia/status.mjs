@@ -2,10 +2,16 @@ import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ethers } from 'ethers';
 
 import {
   SEPOLIA_CHAIN_ID,
 } from '../../shared/deploy/artBackendManifest.mjs';
+import {
+  MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+  MUTABLE_STACK_IDENTITY_PROOF,
+  readMutableStackManifest,
+} from '../../shared/deploy/mutableStackManifest.mjs';
 import {
   readVerifySepoliaBindingsConfig,
   runVerifySepoliaBindings,
@@ -64,12 +70,11 @@ function describeValueState(label, value) {
   };
 }
 
-function readDeployment(prefix, chainId, rootDir = ROOT_DIR) {
-  const manifestPath = path.join(rootDir, 'deployments', `${prefix}_${chainId}.json`);
-  return {
-    manifestPath,
-    manifest: readJson(manifestPath),
-  };
+function summarizeSchema(manifest) {
+  if (!manifest.exists) {
+    return 'missing';
+  }
+  return manifest.schema || 'legacy-flat-json';
 }
 
 function getStableManifestPath(rootDir = ROOT_DIR) {
@@ -92,20 +97,162 @@ function readStableArtManifest(rootDir = ROOT_DIR) {
   };
 }
 
-function summarizeDeployment(prefix, chainId, manifest, rootDir = ROOT_DIR) {
+function describeResolvedValueState(label, value, source) {
+  const raw = String(value || '').trim();
   return {
-    prefix,
-    chainId,
-    manifestPath: path.join(rootDir, 'deployments', `${prefix}_${chainId}.json`),
-    exists: Boolean(manifest),
-    contracts: manifest || {},
+    label,
+    present: raw.length > 0,
+    placeholder: looksLikePlaceholder(raw),
+    usable: raw.length > 0 && !looksLikePlaceholder(raw),
+    value: raw,
+    source,
   };
 }
 
-function warnOnMissingContract(warnings, label, value, manifestPath) {
-  if (!hasValue(value)) {
-    warnings.push(`${label} is missing from ${manifestPath}.`);
+function derivePaymasterSignerAddressFromKey(privateKey) {
+  const raw = String(privateKey || '').trim();
+  if (!raw || looksLikePlaceholder(raw)) {
+    return '';
   }
+  try {
+    return new ethers.Wallet(raw).address;
+  } catch {
+    return '';
+  }
+}
+
+function buildResolvedEnvStatus(env, aaDeployment) {
+  const explicitRpcUrl = String(env.RPC_URL || '').trim();
+  const fallbackRpcUrl = String(env.RPC_URL_SEPOLIA || '').trim();
+
+  const explicitPaymasterSigner = String(env.PAYMASTER_SIGNER || '').trim();
+  const paymasterSignerFromKey = derivePaymasterSignerAddressFromKey(env.PAYMASTER_SIGNER_KEY);
+  const manifestPaymasterSigner = aaDeployment.config.paymasterSigner || '';
+
+  const explicitStarknetCore = String(env.STARKNET_CORE || '').trim();
+  const manifestStarknetCore = aaDeployment.config.starknetCore || '';
+
+  const explicitL2UnlockVerifier = String(env.L2_UNLOCK_VERIFIER || '').trim();
+  const manifestL2UnlockVerifier = aaDeployment.config.l2UnlockVerifier || '';
+
+  return {
+    configuredChainId: describeResolvedValueState(
+      'CHAIN_ID',
+      env.CHAIN_ID || String(SEPOLIA_CHAIN_ID),
+      'fixed:sepolia'
+    ),
+    rpcUrl: describeResolvedValueState(
+      'RPC_URL',
+      explicitRpcUrl || fallbackRpcUrl,
+      explicitRpcUrl ? 'env:RPC_URL' : (fallbackRpcUrl ? 'env:RPC_URL_SEPOLIA' : 'missing')
+    ),
+    paymasterSignerAddress: describeResolvedValueState(
+      'PAYMASTER_SIGNER',
+      explicitPaymasterSigner || paymasterSignerFromKey || manifestPaymasterSigner,
+      explicitPaymasterSigner
+        ? 'env:PAYMASTER_SIGNER'
+        : (paymasterSignerFromKey
+          ? 'env:PAYMASTER_SIGNER_KEY'
+          : (manifestPaymasterSigner
+            ? `manifest:${aaDeployment.manifestPath}#config.paymasterSigner`
+            : 'missing'))
+    ),
+    paymasterSignerKey: describeValueState('PAYMASTER_SIGNER_KEY', env.PAYMASTER_SIGNER_KEY),
+    starknetCore: describeResolvedValueState(
+      'STARKNET_CORE',
+      explicitStarknetCore || manifestStarknetCore,
+      explicitStarknetCore
+        ? 'env:STARKNET_CORE'
+        : (manifestStarknetCore
+          ? `manifest:${aaDeployment.manifestPath}#config.starknetCore`
+          : 'missing')
+    ),
+    l2UnlockVerifier: describeResolvedValueState(
+      'L2_UNLOCK_VERIFIER',
+      explicitL2UnlockVerifier || manifestL2UnlockVerifier,
+      explicitL2UnlockVerifier
+        ? 'env:L2_UNLOCK_VERIFIER'
+        : (manifestL2UnlockVerifier
+          ? `manifest:${aaDeployment.manifestPath}#config.l2UnlockVerifier`
+          : 'missing')
+    ),
+  };
+}
+
+function summarizeMutableStack(manifest) {
+  const requiredCoverage =
+    manifest.expectedComponents.length + manifest.expectedDependencies.length;
+  const requiredPresent =
+    manifest.expectedComponents.length - manifest.missingComponents.length +
+    manifest.expectedDependencies.length - manifest.missingDependencies.length;
+
+  return {
+    stack: manifest.stack,
+    label: manifest.label,
+    manifestPath: manifest.manifestPath,
+    exists: manifest.exists,
+    schema: summarizeSchema(manifest),
+    chainId: manifest.chainId,
+    generatedAt: manifest.generatedAt,
+    sourceScript: manifest.sourceScript,
+    classification: manifest.classification,
+    components: manifest.components,
+    dependencies: manifest.dependencies,
+    config: manifest.config,
+    resolvedFrom: manifest.resolvedFrom,
+    expectedComponents: manifest.expectedComponents,
+    expectedDependencies: manifest.expectedDependencies,
+    missingComponents: manifest.missingComponents,
+    missingDependencies: manifest.missingDependencies,
+    placeholderConfig: manifest.placeholderConfig,
+    legacyFieldsPresent: manifest.legacyFieldsPresent,
+    compatibilityAliasesPresent: manifest.compatibilityAliasesPresent,
+    blockers: manifest.blockers,
+    requiredCoverage: {
+      present: requiredPresent,
+      total: requiredCoverage,
+    },
+  };
+}
+
+function determineOverallMutableClassification(identityProof, accountAbstraction, envStatus) {
+  if (
+    identityProof.classification === 'complete' &&
+    accountAbstraction.classification === 'complete'
+  ) {
+    if (
+      envStatus.rpcUrl.usable &&
+      envStatus.paymasterSignerAddress.usable &&
+      envStatus.starknetCore.usable &&
+      envStatus.l2UnlockVerifier.usable
+    ) {
+      return 'complete';
+    }
+    return 'placeholder-configured';
+  }
+
+  if (!identityProof.exists && !accountAbstraction.exists) {
+    return 'missing';
+  }
+
+  return 'partial';
+}
+
+function collectAliasUsage(manifest) {
+  const aliasNotes = [];
+  for (const [field, source] of Object.entries(manifest.resolvedFrom.components || {})) {
+    if (!source || source.endsWith(`.${field}`) || source === field) {
+      continue;
+    }
+    aliasNotes.push(`${field} currently resolves via ${source}.`);
+  }
+  for (const [field, source] of Object.entries(manifest.resolvedFrom.dependencies || {})) {
+    if (!source || source.endsWith(`.${field}`) || source === field) {
+      continue;
+    }
+    aliasNotes.push(`${field} currently resolves via ${source}.`);
+  }
+  return aliasNotes;
 }
 
 function buildEffectiveEnv(env) {
@@ -123,17 +270,22 @@ export async function collectSepoliaStatus(
 ) {
   const effectiveEnv = buildEffectiveEnv(env);
   const stableArt = readStableArtManifest(rootDir);
-  const stark = readDeployment('stark', SEPOLIA_CHAIN_ID, rootDir);
-  const aa4337 = readDeployment('4337', SEPOLIA_CHAIN_ID, rootDir);
+  const stark = summarizeMutableStack(
+    readMutableStackManifest({
+      stack: MUTABLE_STACK_IDENTITY_PROOF,
+      chainId: SEPOLIA_CHAIN_ID,
+      rootDir,
+    })
+  );
+  const aa4337 = summarizeMutableStack(
+    readMutableStackManifest({
+      stack: MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+      chainId: SEPOLIA_CHAIN_ID,
+      rootDir,
+    })
+  );
 
-  const envStatus = {
-    configuredChainId: describeValueState('CHAIN_ID', env.CHAIN_ID || String(SEPOLIA_CHAIN_ID)),
-    rpcUrl: describeValueState('RPC_URL', effectiveEnv.RPC_URL),
-    paymasterSignerAddress: describeValueState('PAYMASTER_SIGNER', env.PAYMASTER_SIGNER),
-    paymasterSignerKey: describeValueState('PAYMASTER_SIGNER_KEY', env.PAYMASTER_SIGNER_KEY),
-    starknetCore: describeValueState('STARKNET_CORE', env.STARKNET_CORE),
-    l2UnlockVerifier: describeValueState('L2_UNLOCK_VERIFIER', env.L2_UNLOCK_VERIFIER),
-  };
+  const envStatus = buildResolvedEnvStatus(env, aa4337);
 
   const warnings = [];
   const errors = [];
@@ -144,33 +296,40 @@ export async function collectSepoliaStatus(
   if (!stableArt) {
     warnings.push(`Stable art/data manifest is missing at ${getStableManifestPath(rootDir)}.`);
   }
-  if (!stark.manifest) {
+  if (!stark.exists) {
     warnings.push(`Mutable identity/proof manifest is missing at ${stark.manifestPath}.`);
   }
-  if (!aa4337.manifest) {
+  if (!aa4337.exists) {
     warnings.push(`Mutable account/paymaster manifest is missing at ${aa4337.manifestPath}.`);
   }
-  if (stark.manifest) {
-    warnOnMissingContract(warnings, 'PhilIdentityGate/ProofGate', stark.manifest.PhilIdentityGate || stark.manifest.ProofGate, stark.manifestPath);
-    warnOnMissingContract(warnings, 'PhilIdentityMint', stark.manifest.PhilIdentityMint, stark.manifestPath);
-    warnOnMissingContract(warnings, 'humanityVerifier', stark.manifest.humanityVerifier || stark.manifest.MockHumanityVerifier || stark.manifest.FactRegistryHumanityVerifier, stark.manifestPath);
+  for (const manifest of [stark, aa4337]) {
+    for (const blocker of manifest.blockers) {
+      warnings.push(`${manifest.label}: ${blocker}`);
+    }
+    if (manifest.legacyFieldsPresent.length > 0) {
+      warnings.push(
+        `${manifest.label}: legacy fields still present (${manifest.legacyFieldsPresent.join(', ')}).`
+      );
+    }
+    const aliasUsage = collectAliasUsage(manifest);
+    for (const note of aliasUsage) {
+      warnings.push(`${manifest.label}: ${note}`);
+    }
   }
-  if (aa4337.manifest) {
-    warnOnMissingContract(warnings, 'PhilAccountFactory', aa4337.manifest.PhilAccountFactory, aa4337.manifestPath);
-    warnOnMissingContract(warnings, 'PhilPaymaster', aa4337.manifest.PhilPaymaster, aa4337.manifestPath);
-    warnOnMissingContract(warnings, 'PhilUnlockInbox', aa4337.manifest.PhilUnlockInbox, aa4337.manifestPath);
+  if (stark.classification === 'complete' && stark.dependencies.PhilSVGStorage && !stableArt) {
+    warnings.push('Identity/proof manifest links reused art/data contracts, but the stable art/data manifest is missing.');
   }
   if (!envStatus.rpcUrl.usable) {
     warnings.push('RPC_URL or RPC_URL_SEPOLIA is missing or placeholder; live Sepolia verification will be skipped.');
   }
-  if (!envStatus.paymasterSignerAddress.usable && !envStatus.paymasterSignerKey.usable) {
-    warnings.push('PAYMASTER_SIGNER or PAYMASTER_SIGNER_KEY is missing; paymaster signer verification cannot run live.');
+  if (!envStatus.paymasterSignerAddress.usable) {
+    warnings.push('PAYMASTER_SIGNER, PAYMASTER_SIGNER_KEY, or 4337 manifest paymasterSigner is missing; paymaster verification cannot run live.');
   }
   if (!envStatus.starknetCore.usable) {
-    warnings.push('STARKNET_CORE is missing or placeholder.');
+    warnings.push('STARKNET_CORE is missing or placeholder and no mutable 4337 manifest fallback is available.');
   }
   if (!envStatus.l2UnlockVerifier.usable) {
-    warnings.push('L2_UNLOCK_VERIFIER is missing or placeholder.');
+    warnings.push('L2_UNLOCK_VERIFIER is missing or placeholder and no mutable 4337 manifest fallback is available.');
   }
 
   let configStatus = {
@@ -204,6 +363,7 @@ export async function collectSepoliaStatus(
     ok: false,
     skipped: false,
     message: '',
+    state: 'unknown',
   };
 
   if (configStatus.readable && envStatus.rpcUrl.usable) {
@@ -213,13 +373,16 @@ export async function collectSepoliaStatus(
         readVerifySepoliaBindingsConfig(effectiveEnv, rootDir)
       );
       liveVerification.ok = true;
+      liveVerification.state = 'passed';
       liveVerification.message = 'On-chain bindings verified successfully.';
     } catch (error) {
+      liveVerification.state = 'failed';
       liveVerification.message = error instanceof Error ? error.message : String(error);
       errors.push(`Live Sepolia verification failed: ${liveVerification.message}`);
     }
   } else {
     liveVerification.skipped = true;
+    liveVerification.state = 'skipped';
     liveVerification.message = 'Live Sepolia verification skipped because required env/config values are missing.';
     if (requireLive) {
       errors.push(liveVerification.message);
@@ -244,8 +407,9 @@ export async function collectSepoliaStatus(
       verification: stableArt?.raw?.verification || null,
     },
     mutable: {
-      identityProof: summarizeDeployment('stark', SEPOLIA_CHAIN_ID, stark.manifest, rootDir),
-      accountAbstraction: summarizeDeployment('4337', SEPOLIA_CHAIN_ID, aa4337.manifest, rootDir),
+      identityProof: stark,
+      accountAbstraction: aa4337,
+      overallClassification: determineOverallMutableClassification(stark, aa4337, envStatus),
     },
     env: envStatus,
     config: configStatus,
@@ -263,10 +427,34 @@ function printAddress(label, value) {
   console.log(`  ${label}: ${value || '(missing)'}`);
 }
 
+function printResolvedValue(label, value, source) {
+  if (!value) {
+    console.log(`  ${label}: (missing)`);
+    return;
+  }
+  if (source && source !== label) {
+    console.log(`  ${label}: ${value} [via ${source}]`);
+    return;
+  }
+  console.log(`  ${label}: ${value}`);
+}
+
+function printLines(title, values) {
+  if (!values || values.length === 0) {
+    return;
+  }
+  console.log(`  ${title}:`);
+  for (const value of values) {
+    console.log(`    - ${value}`);
+  }
+}
+
 export function printSepoliaStatus(status) {
   console.log('zkPhil Sepolia Status');
   console.log(`  Generated: ${status.generatedAt}`);
   console.log(`  Chain ID:  ${status.chainId}`);
+  console.log(`  Mutable status: ${status.mutable.overallClassification}`);
+  console.log(`  Live verification: ${status.liveVerification.state}`);
 
   console.log('\nStable reused art/data');
   console.log(`  Manifest: ${status.reused.exists ? 'ok' : 'missing'} (${status.reused.manifestPath})`);
@@ -280,22 +468,95 @@ export function printSepoliaStatus(status) {
   }
 
   console.log('\nMutable identity/proof stack');
-  console.log(`  Manifest: ${status.mutable.identityProof.exists ? 'ok' : 'missing'} (${status.mutable.identityProof.manifestPath})`);
-  printAddress('PhilIdentityGate', status.mutable.identityProof.contracts.PhilIdentityGate || status.mutable.identityProof.contracts.ProofGate || '');
-  printAddress('PhilIdentityMint', status.mutable.identityProof.contracts.PhilIdentityMint || '');
-  printAddress('humanityVerifier', status.mutable.identityProof.contracts.humanityVerifier || status.mutable.identityProof.contracts.MockHumanityVerifier || status.mutable.identityProof.contracts.FactRegistryHumanityVerifier || '');
+  console.log(`  State: ${status.mutable.identityProof.classification}`);
+  console.log(`  Manifest: ${status.mutable.identityProof.schema} (${status.mutable.identityProof.manifestPath})`);
+  if (status.mutable.identityProof.sourceScript) {
+    console.log(`  Source script: ${status.mutable.identityProof.sourceScript}`);
+  }
+  console.log(
+    `  Required coverage: ${status.mutable.identityProof.requiredCoverage.present}/${status.mutable.identityProof.requiredCoverage.total}`
+  );
+  printResolvedValue(
+    'PhilIdentityGate',
+    status.mutable.identityProof.components.PhilIdentityGate,
+    status.mutable.identityProof.resolvedFrom.components.PhilIdentityGate
+  );
+  printResolvedValue(
+    'PhilIdentityMint',
+    status.mutable.identityProof.components.PhilIdentityMint,
+    status.mutable.identityProof.resolvedFrom.components.PhilIdentityMint
+  );
+  printResolvedValue(
+    'humanityVerifier',
+    status.mutable.identityProof.components.humanityVerifier,
+    status.mutable.identityProof.resolvedFrom.components.humanityVerifier
+  );
+  printResolvedValue(
+    'factRegistry',
+    status.mutable.identityProof.dependencies.factRegistry,
+    status.mutable.identityProof.resolvedFrom.dependencies.factRegistry
+  );
+  printResolvedValue(
+    'PhilSVGStorage',
+    status.mutable.identityProof.dependencies.PhilSVGStorage,
+    status.mutable.identityProof.resolvedFrom.dependencies.PhilSVGStorage
+  );
+  printResolvedValue(
+    'PhilLayerRegistry',
+    status.mutable.identityProof.dependencies.PhilLayerRegistry,
+    status.mutable.identityProof.resolvedFrom.dependencies.PhilLayerRegistry
+  );
+  printLines('Compatibility aliases present', status.mutable.identityProof.compatibilityAliasesPresent);
+  printLines('Legacy fields still present', status.mutable.identityProof.legacyFieldsPresent);
+  printLines('Blockers', status.mutable.identityProof.blockers);
 
   console.log('\nMutable account/paymaster stack');
-  console.log(`  Manifest: ${status.mutable.accountAbstraction.exists ? 'ok' : 'missing'} (${status.mutable.accountAbstraction.manifestPath})`);
-  printAddress('PhilAccountFactory', status.mutable.accountAbstraction.contracts.PhilAccountFactory || '');
-  printAddress('PhilPaymaster', status.mutable.accountAbstraction.contracts.PhilPaymaster || '');
-  printAddress('PhilUnlockInbox', status.mutable.accountAbstraction.contracts.PhilUnlockInbox || '');
+  console.log(`  State: ${status.mutable.accountAbstraction.classification}`);
+  console.log(`  Manifest: ${status.mutable.accountAbstraction.schema} (${status.mutable.accountAbstraction.manifestPath})`);
+  if (status.mutable.accountAbstraction.sourceScript) {
+    console.log(`  Source script: ${status.mutable.accountAbstraction.sourceScript}`);
+  }
+  console.log(
+    `  Required coverage: ${status.mutable.accountAbstraction.requiredCoverage.present}/${status.mutable.accountAbstraction.requiredCoverage.total}`
+  );
+  printResolvedValue(
+    'PhilAccountFactory',
+    status.mutable.accountAbstraction.components.PhilAccountFactory,
+    status.mutable.accountAbstraction.resolvedFrom.components.PhilAccountFactory
+  );
+  printResolvedValue(
+    'PhilPaymaster',
+    status.mutable.accountAbstraction.components.PhilPaymaster,
+    status.mutable.accountAbstraction.resolvedFrom.components.PhilPaymaster
+  );
+  printResolvedValue(
+    'PhilUnlockInbox',
+    status.mutable.accountAbstraction.components.PhilUnlockInbox,
+    status.mutable.accountAbstraction.resolvedFrom.components.PhilUnlockInbox
+  );
+  printResolvedValue(
+    'PhilIdentityMint',
+    status.mutable.accountAbstraction.dependencies.PhilIdentityMint,
+    status.mutable.accountAbstraction.resolvedFrom.dependencies.PhilIdentityMint
+  );
+  printResolvedValue(
+    'PhilIdentityGate',
+    status.mutable.accountAbstraction.dependencies.PhilIdentityGate,
+    status.mutable.accountAbstraction.resolvedFrom.dependencies.PhilIdentityGate
+  );
+  printResolvedValue(
+    'EntryPoint',
+    status.mutable.accountAbstraction.dependencies.EntryPoint,
+    status.mutable.accountAbstraction.resolvedFrom.dependencies.EntryPoint
+  );
+  printLines('Placeholder config', status.mutable.accountAbstraction.placeholderConfig);
+  printLines('Blockers', status.mutable.accountAbstraction.blockers);
 
-  console.log('\nEnv / config');
-  console.log(`  RPC_URL: ${status.env.rpcUrl.usable ? 'usable' : 'missing-or-placeholder'}`);
-  console.log(`  PAYMASTER_SIGNER(_KEY): ${(status.env.paymasterSignerAddress.usable || status.env.paymasterSignerKey.usable) ? 'usable' : 'missing-or-placeholder'}`);
-  console.log(`  STARKNET_CORE: ${status.env.starknetCore.usable ? 'usable' : 'missing-or-placeholder'}`);
-  console.log(`  L2_UNLOCK_VERIFIER: ${status.env.l2UnlockVerifier.usable ? 'usable' : 'missing-or-placeholder'}`);
+  console.log('\nResolved config');
+  console.log(`  RPC_URL: ${status.env.rpcUrl.usable ? `usable via ${status.env.rpcUrl.source}` : 'missing-or-placeholder'}`);
+  console.log(`  PAYMASTER_SIGNER: ${status.env.paymasterSignerAddress.usable ? `usable via ${status.env.paymasterSignerAddress.source}` : 'missing-or-placeholder'}`);
+  console.log(`  STARKNET_CORE: ${status.env.starknetCore.usable ? `usable via ${status.env.starknetCore.source}` : 'missing-or-placeholder'}`);
+  console.log(`  L2_UNLOCK_VERIFIER: ${status.env.l2UnlockVerifier.usable ? `usable via ${status.env.l2UnlockVerifier.source}` : 'missing-or-placeholder'}`);
   console.log(`  Binding config: ${status.config.readable ? 'ready' : `incomplete (${status.config.error})`}`);
 
   console.log('\nVerification');

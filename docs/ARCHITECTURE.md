@@ -22,6 +22,9 @@ Mutable, redeployable infrastructure:
 - provider-aware identity core manifests live under `deployments/stark_<chainId>.json`
 - 4337/account manifests live under `deployments/4337_<chainId>.json`
 - local art bootstrap manifests live under `deployments/art_<chainId>.json`
+- current deploy scripts write Sepolia/local mutable manifests as `zkphil-mutable-stack-v1`
+- those manifests separate `components`, `dependencies`, `config`, and computed `status`
+- status tooling still reads older flat manifests, but marks them as `legacy-flat-json` and surfaces alias resolution instead of treating them as fully current
 
 Deployment modes:
 
@@ -147,6 +150,8 @@ Dev helper behavior:
 - `scripts/run_local_e2e.sh` now performs readiness checks for RPC, prover, backend, Stark core, 4337, and the art backend
 - `npm run smoke:local` wraps helper bring-up, readiness checks, the mock-humanity flow, deterministic assertions, and teardown
 - `npm run status:sepolia` reports the stable reuse boundary and mutable Sepolia manifests in one place
+- `npm run status:sepolia` now classifies the mutable Sepolia layers as `complete`, `partial`, `missing`, or `placeholder-configured`
+- `npm run verify:sepolia` can resolve `paymasterSigner`, `starknetCore`, and `l2UnlockVerifier` from the mutable 4337 manifest when that manifest is complete
 - local helper runs pin Node 22 for backend/prover/bootstrap work even when the interactive shell defaults to an older Node
 - proof bundles live under `generated/proofs/` so compiler output cleanup does not erase them
 

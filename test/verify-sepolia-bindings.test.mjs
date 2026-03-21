@@ -94,3 +94,69 @@ test('readVerifySepoliaBindingsConfig fails closed when Starknet bindings are mi
     /L2_UNLOCK_VERIFIER/
   );
 });
+
+test('readVerifySepoliaBindingsConfig can resolve mutable 4337 config from the manifest', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-sepolia-'));
+  const deploymentsDir = path.join(tempRoot, 'deployments');
+  fs.mkdirSync(deploymentsDir, { recursive: true });
+
+  writeJson(path.join(deploymentsDir, 'stark_11155111.json'), {
+    schema: 'zkphil-mutable-stack-v1',
+    stack: 'identity-proof',
+    chainId: 11155111,
+    components: {
+      PhilIdentityGate: '0x1000000000000000000000000000000000000001',
+      PhilIdentityMint: '0x2000000000000000000000000000000000000002',
+      humanityVerifier: '0x3000000000000000000000000000000000000003',
+    },
+    dependencies: {
+      factRegistry: '0x4000000000000000000000000000000000000004',
+    },
+    config: {},
+    PhilIdentityGate: '0x1000000000000000000000000000000000000001',
+    PhilIdentityMint: '0x2000000000000000000000000000000000000002',
+    humanityVerifier: '0x3000000000000000000000000000000000000003',
+    factRegistry: '0x4000000000000000000000000000000000000004',
+  });
+  writeJson(path.join(deploymentsDir, '4337_11155111.json'), {
+    schema: 'zkphil-mutable-stack-v1',
+    stack: 'account-abstraction',
+    chainId: 11155111,
+    components: {
+      PhilAccountFactory: '0x5000000000000000000000000000000000000005',
+      PhilPaymaster: '0x6000000000000000000000000000000000000006',
+      PhilUnlockInbox: '0x7000000000000000000000000000000000000007',
+    },
+    dependencies: {
+      PhilIdentityMint: '0x2000000000000000000000000000000000000002',
+      PhilIdentityGate: '0x1000000000000000000000000000000000000001',
+      EntryPoint: '0x8000000000000000000000000000000000000008',
+    },
+    config: {
+      paymasterSigner: '0x9000000000000000000000000000000000000009',
+      starknetCore: '0xA00000000000000000000000000000000000000A',
+      l2UnlockVerifier: '0x1234',
+    },
+    PhilAccountFactory: '0x5000000000000000000000000000000000000005',
+    PhilPaymaster: '0x6000000000000000000000000000000000000006',
+    PhilUnlockInbox: '0x7000000000000000000000000000000000000007',
+    PhilIdentityMint: '0x2000000000000000000000000000000000000002',
+    PhilIdentityGate: '0x1000000000000000000000000000000000000001',
+    EntryPoint: '0x8000000000000000000000000000000000000008',
+    paymasterSigner: '0x9000000000000000000000000000000000000009',
+    starknetCore: '0xA00000000000000000000000000000000000000A',
+    l2UnlockVerifier: '0x1234',
+  });
+
+  const config = readVerifySepoliaBindingsConfig(
+    {
+      RPC_URL: 'https://rpc.example',
+      CHAIN_ID: '11155111',
+    },
+    tempRoot
+  );
+
+  assert.equal(config.paymasterSignerAddress, '0x9000000000000000000000000000000000000009');
+  assert.equal(config.starknetCoreAddress, '0xA00000000000000000000000000000000000000A');
+  assert.equal(config.l2UnlockVerifier, 0x1234n);
+});

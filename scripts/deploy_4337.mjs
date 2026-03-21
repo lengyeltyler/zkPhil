@@ -40,6 +40,10 @@ import {
   planContractCall,
   planDeploy,
 } from '../shared/deploy/dryRun.mjs';
+import {
+  MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+  writeMutableStackManifest,
+} from '../shared/deploy/mutableStackManifest.mjs';
 import { logTx, waitForReceiptWithTimeout } from './sepolia/txutil.mjs';
 import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
 
@@ -620,14 +624,31 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   const deploymentsDir = path.join(__dirname, '../deployments');
   const outPath = path.join(deploymentsDir, `4337_${chainId}.json`);
   if (!config.dryRun) {
-    if (!fs.existsSync(deploymentsDir)) {
-      fs.mkdirSync(deploymentsDir, { recursive: true });
-    }
-
-    const existing4337 = loadExisting4337(chainId)?.data || {};
-    Object.assign(existing4337, deployments);
-    fs.writeFileSync(outPath, JSON.stringify(existing4337, null, 2));
-    console.log(`\nDeployments saved to: ${outPath}`);
+    const manifestWrite = writeMutableStackManifest({
+      stack: MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+      chainId,
+      sourceScript: 'scripts/deploy_4337.mjs',
+      components: {
+        PhilAccountImpl: deployments.PhilAccountImpl,
+        PhilUnlockInbox: deployments.PhilUnlockInbox,
+        PhilAccountFactory: deployments.PhilAccountFactory,
+        PhilPaymaster: deployments.PhilPaymaster,
+        MockStarknetCore: deployments.MockStarknetCore || '',
+      },
+      dependencies: {
+        EntryPoint: deployments.EntryPoint,
+        PhilIdentityMint: deployments.PhilIdentityMint,
+        PhilIdentityGate: deployments.PhilIdentityGate,
+      },
+      config: {
+        paymasterSigner: paymasterSignerAddr,
+        starknetCore,
+        l2UnlockVerifier,
+        paymasterDeposit: config.paymasterDeposit,
+        useMockInbox,
+      },
+    });
+    console.log(`\nDeployments saved to: ${manifestWrite.manifestPath}`);
   } else {
     console.log(`DRY_RUN: skipping 4337 deployment manifest write (${outPath}).`);
   }

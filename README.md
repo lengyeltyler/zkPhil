@@ -25,6 +25,8 @@ The active verifier bridge is still fact-registry-based.
 - Stable Sepolia trait/data infrastructure now lives in [`config/stable-art-backends/sepolia.json`](./config/stable-art-backends/sepolia.json).
 - That manifest is the intended reused base for `PhilSVGStorage`, `PhilLayerRegistry`, and `PhilNFT` on Sepolia.
 - Mutable identity/proof/account infrastructure still writes per-chain deployment manifests under `deployments/`, for example `stark_<chainId>.json` and `4337_<chainId>.json`.
+- Those mutable manifests now use `zkphil-mutable-stack-v1` when written by the current deploy scripts and split their contents into `components`, `dependencies`, `config`, and `status`.
+- `status:sepolia` also understands older flat manifests and will call them out as `legacy-flat-json`, `partial`, or alias-backed instead of pretending they are current.
 - Local helper runs reuse healthy local manifests when possible and only re-bootstrap the art backend when the local chain is fresh or the manifest is unhealthy.
 
 ## Active identity architecture
@@ -156,7 +158,23 @@ For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 
 ## Sepolia status
 
-`npm run status:sepolia` reports the stable reused art/data addresses, the mutable deployment manifests, missing env/config values, and whether live verification ran or was skipped.
+`npm run status:sepolia` reports the stable reused art/data addresses, the mutable Stark and 4337 manifests, legacy alias usage, placeholder config, and whether live verification ran or was skipped.
+
+The mutable Sepolia states are classified as:
+
+- `complete`
+  - required mutable manifests and linked config are present
+- `partial`
+  - a manifest exists but required contracts or dependencies are still missing, or the manifest is still legacy/alias-backed
+- `missing`
+  - no mutable manifest is present for that Sepolia layer
+- `placeholder-configured`
+  - manifests are present, but required live-verification config still comes from placeholders
+
+The current expected mutable Sepolia manifest paths are:
+
+- `deployments/stark_11155111.json`
+- `deployments/4337_11155111.json`
 
 `npm run verify:sepolia` is the stricter compatibility alias for live verification when a usable Sepolia RPC and signer config are available.
 
@@ -170,8 +188,6 @@ Primary:
 - `RPC_URL`
 - `RPC_URL_SEPOLIA`
 - `PAYMASTER_SIGNER_KEY`
-- `STARKNET_CORE`
-- `L2_UNLOCK_VERIFIER`
 
 Optional:
 - `ART_BACKEND_MODE`
@@ -179,9 +195,19 @@ Optional:
 - `FACT_REGISTRY`
 - `FACT_REGISTRY_OPERATOR_KEY`
 - `PAYMASTER_SIGNER`
+- `STARKNET_CORE`
+- `L2_UNLOCK_VERIFIER`
 - `LOCAL_PROVER_HOST`
 - `LOCAL_PROVER_PORT`
 - `NODE_BIN`
+
+Sepolia mutable-manifest fallbacks:
+- `PROOF_GATE`
+- `PHIL_IDENTITY_MINT`
+- `PHIL_ACCOUNT_FACTORY`
+- `PHIL_PAYMASTER`
+
+If the mutable Sepolia manifests are complete, `status:sepolia` and `verify:sepolia` can resolve `PAYMASTER_SIGNER`, `STARKNET_CORE`, and `L2_UNLOCK_VERIFIER` from `deployments/4337_11155111.json` instead of requiring explicit env overrides.
 
 Generic bundle-path and old proof-context compatibility aliases from earlier refactors have been removed from the active tracked workflow.
 
@@ -202,5 +228,6 @@ node --test test/sepolia-status.test.mjs
 - Cleanup report: [`CLEANUP_REPORT.md`](./CLEANUP_REPORT.md)
 - DEV runbook: [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 - Project status: [`PROJECT_STATUS_REPORT.md`](./PROJECT_STATUS_REPORT.md)
+- Sepolia cleanup report: [`SEPOLIA_STATUS_CLEANUP_REPORT.md`](./SEPOLIA_STATUS_CLEANUP_REPORT.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)
 - Humanity-ready summary: [`HUMANITY_READY_SUMMARY.md`](./HUMANITY_READY_SUMMARY.md)

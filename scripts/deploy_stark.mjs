@@ -37,6 +37,10 @@ import { fileURLToPath } from 'url';
 import { deployPhilSystem } from './local/deployPhilSystem.mjs';
 import { DEFAULT_DRY_RUN_PRIVATE_KEY, isDryRunEnabled, isTruthy } from '../shared/deploy/dryRun.mjs';
 import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
+import {
+  MUTABLE_STACK_IDENTITY_PROOF,
+  writeMutableStackManifest,
+} from '../shared/deploy/mutableStackManifest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -233,9 +237,37 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
   const deploymentsDir = path.join(ROOT_DIR, 'deployments');
   const starkFile = path.join(deploymentsDir, `stark_${deployments.chainId}.json`);
   if (!config.dryRun) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-    fs.writeFileSync(starkFile, JSON.stringify(starkDeployments, null, 2));
-    console.log(`Saved stark deployment manifest: ${starkFile}`);
+    const manifestWrite = writeMutableStackManifest({
+      stack: MUTABLE_STACK_IDENTITY_PROOF,
+      chainId: deployments.chainId,
+      rootDir: ROOT_DIR,
+      sourceScript: 'scripts/deploy_stark.mjs',
+      components: {
+        PhilIdentityGate: deployments.PhilIdentityGate,
+        PhilIdentityMint: deployments.PhilIdentityMint,
+        humanityVerifier: deployments.humanityVerifier,
+        PhilRenderer: deployments.PhilRenderer,
+        PhilWeb3: deployments.PhilWeb3,
+      },
+      dependencies: {
+        factRegistry: deployments.factRegistry,
+        PhilSVGStorage: deployments.PhilSVGStorage,
+        PhilLayerRegistry: deployments.PhilLayerRegistry,
+        PhilNFT: deployments.PhilNFT,
+      },
+      config: {
+        humanityProvider: deployments.humanityProvider,
+        programHash: config.programHash,
+        proofContext: config.proofContext.toString(),
+        verifierConfigHash: deployments.verifierConfigHash,
+        artBackendReused: deployments.artBackendReused,
+        artBackendMode: deployments.artBackendMode,
+        artBackendManifest: deployments.artBackendManifest,
+        artBackendSource: deployments.artBackendSource,
+        proofMode: 'LOCAL_STWO_FACTS',
+      },
+    });
+    console.log(`Saved stark deployment manifest: ${manifestWrite.manifestPath}`);
   } else {
     console.log(`DRY_RUN: skipping stark deployment manifest write (${starkFile}).`);
   }

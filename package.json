@@ -16,7 +16,7 @@
     "smoke:local": "node scripts/local/smoke_local.mjs",
     "test": "npm run compile && npm run test:legacy && npm run test:art-backend && npm run test:node && npm run test:hardhat && npm run test:server",
     "test:art-backend": "node scripts/run-tests.mjs",
-    "test:node": "npx hardhat compile && node --test test/art-backend-manifest.test.mjs test/art-batch-planning.test.mjs test/rpc-retry.test.mjs test/sepolia-status.test.mjs test/svg-render.integration.test.mjs test/eligibility-proof.contract.test.mjs test/mock-humanity.contract.test.mjs test/frontend-selection.integration.test.mjs test/error-cases.contract.test.mjs test/paymaster-sponsorship.test.mjs test/unlock-ticket-2fa.test.mjs test/proof-parity.action.test.mjs test/backend-compatibility.test.mjs test/frontend-connectivity.test.mjs test/verify-sepolia-bindings.test.mjs",
+    "test:node": "npx hardhat compile && node --test test/art-backend-manifest.test.mjs test/art-batch-planning.test.mjs test/rpc-retry.test.mjs test/mutable-stack-manifest.test.mjs test/sepolia-status.test.mjs test/svg-render.integration.test.mjs test/eligibility-proof.contract.test.mjs test/mock-humanity.contract.test.mjs test/frontend-selection.integration.test.mjs test/error-cases.contract.test.mjs test/paymaster-sponsorship.test.mjs test/unlock-ticket-2fa.test.mjs test/proof-parity.action.test.mjs test/backend-compatibility.test.mjs test/frontend-connectivity.test.mjs test/verify-sepolia-bindings.test.mjs",
     "test:hardhat": "npx hardhat test test/proofgate.backend-signer.test.js test/phil-account.auto-approval.test.js test/phil-marketplace.test.js",
     "test:server": "cd server-ts && npm test",
     "test:legacy": "node scripts/check_no_legacy_rails.mjs",

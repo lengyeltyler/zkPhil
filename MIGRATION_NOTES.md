@@ -38,6 +38,13 @@ Retained because they still provide real compatibility value:
 - `verify:sepolia` remains as a stricter alias for live Sepolia verification
 - the database migration from `allowlist_entitlements` to `eligibility_entitlements` remains to protect existing local DBs
 
+## Sepolia mutable-manifest cleanup
+
+- mutable Stark and 4337 manifests now write `zkphil-mutable-stack-v1`
+- the current structured layout separates `components`, `dependencies`, `config`, and `status`
+- `status:sepolia` still reads older flat manifests but labels them `legacy-flat-json` and surfaces alias-backed fields explicitly
+- `verify:sepolia` can now resolve `paymasterSigner`, `starknetCore`, and `l2UnlockVerifier` from a complete `deployments/4337_<chainId>.json`
+
 ## Mock-humanity additions
 
 New bundle and request concepts:
