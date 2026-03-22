@@ -23,7 +23,7 @@ const stableArtPath = path.relative(REPO_ROOT, getStableArtBackendManifestPath(1
 const sepoliaArtDeployment = readJson(stableArtPath);
 const previewConfig = {
   chainId: 11155111,
-  philTestMintAddress: starkDeployment?.PhilTestMint || '',
+  philIdentityMintAddress: starkDeployment?.PhilIdentityMint || starkDeployment?.PhilTestMint || '',
   rendererAddress: starkDeployment?.PhilRenderer || '',
   web3Address: starkDeployment?.PhilWeb3 || '',
   layerRegistryAddress: sepoliaArtDeployment?.contracts?.layerRegistry || starkDeployment?.PhilLayerRegistry || '',

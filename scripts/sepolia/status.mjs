@@ -304,6 +304,9 @@ export async function collectSepoliaStatus(
   }
   for (const manifest of [stark, aa4337]) {
     for (const blocker of manifest.blockers) {
+      if (!manifest.exists && blocker === `Manifest is missing at ${manifest.manifestPath}.`) {
+        continue;
+      }
       warnings.push(`${manifest.label}: ${blocker}`);
     }
     if (manifest.legacyFieldsPresent.length > 0) {

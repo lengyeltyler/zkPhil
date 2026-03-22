@@ -91,3 +91,30 @@ test('writeMutableStackManifest emits a complete structured 4337 manifest', () =
   assert.equal(manifest.config.l2UnlockVerifier, '0x1234');
   assert.deepEqual(manifest.blockers, []);
 });
+
+test('writeMutableStackManifest omits empty inactive verifier aliases from identity-proof manifests', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-mutable-stack-'));
+
+  const { payload } = writeMutableStackManifest({
+    stack: MUTABLE_STACK_IDENTITY_PROOF,
+    chainId: 11155111,
+    rootDir: tempRoot,
+    sourceScript: 'scripts/deploy_stark.mjs',
+    components: {
+      PhilIdentityGate: '0x1000000000000000000000000000000000000001',
+      PhilIdentityMint: '0x2000000000000000000000000000000000000002',
+      humanityVerifier: '0x3000000000000000000000000000000000000003',
+    },
+    dependencies: {
+      factRegistry: '0x4000000000000000000000000000000000000004',
+    },
+    config: {
+      humanityProvider: 'local-credential',
+      proofMode: 'LOCAL_STWO_FACTS',
+    },
+  });
+
+  assert.equal(payload.ProofGate, '0x1000000000000000000000000000000000000001');
+  assert.equal(payload.FactRegistryHumanityVerifier, '0x3000000000000000000000000000000000000003');
+  assert.equal('MockHumanityVerifier' in payload, false);
+});

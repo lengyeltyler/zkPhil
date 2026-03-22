@@ -5,7 +5,7 @@ const injectedConfig =
 
 export const SEPOLIA_PREVIEW_CONFIG = {
   chainId: 11155111,
-  philTestMintAddress: injectedConfig?.philTestMintAddress || '',
+  philIdentityMintAddress: injectedConfig?.philIdentityMintAddress || '',
   rendererAddress: injectedConfig?.rendererAddress || '',
   web3Address: injectedConfig?.web3Address || '',
   layerRegistryAddress: injectedConfig?.layerRegistryAddress || '',

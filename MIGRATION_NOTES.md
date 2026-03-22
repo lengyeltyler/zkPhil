@@ -44,6 +44,8 @@ Retained because they still provide real compatibility value:
 - the current structured layout separates `components`, `dependencies`, `config`, and `status`
 - `status:sepolia` still reads older flat manifests but labels them `legacy-flat-json` and surfaces alias-backed fields explicitly
 - `verify:sepolia` can now resolve `paymasterSigner`, `starknetCore`, and `l2UnlockVerifier` from a complete `deployments/4337_<chainId>.json`
+- the live Sepolia Stark-side identity/proof stack has now been redeployed into the current humanity-ready layout and tracked in `deployments/stark_11155111.json`
+- the Sepolia 4337 layer still remains pending real Starknet unlock config, so `verify:sepolia` continues to fail closed honestly
 
 ## Mock-humanity additions
 

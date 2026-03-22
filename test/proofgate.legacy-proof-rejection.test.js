@@ -6,6 +6,9 @@ import { buildMintProof, createEligibilityContext, deployFactProofGate, register
 import { PHIL_LAYER_ORDER } from '../src/layer-catalog.mjs';
 import { FIXTURE_VARIANTS } from './hybrid-renderer-helpers.mjs';
 
+// Regression coverage for the current fact-backed gate and explicit rejection of
+// legacy backend-signed mint payloads that no longer authorize issuance.
+
 const PROGRAM_HASH = '0x' + '44'.repeat(32);
 const CONTEXT_ID = 13n;
 const CHAIN_ID = 31337;

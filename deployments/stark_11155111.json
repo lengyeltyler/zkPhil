@@ -1,0 +1,74 @@
+{
+  "schema": "zkphil-mutable-stack-v1",
+  "deploymentType": "mutable",
+  "stack": "identity-proof",
+  "chainId": 11155111,
+  "generatedAt": "2026-03-22T01:48:03.855Z",
+  "sourceScript": "scripts/deploy_stark.mjs",
+  "components": {
+    "PhilIdentityGate": "0x0b574d1c282C64559912029A49971B06c7156851",
+    "PhilIdentityMint": "0x8A5c32c0f45bFad715C812bc0B5DDEf12E6b4934",
+    "humanityVerifier": "0xB1757d86DA203B0801306670aa6Ec7dc6b7Ed6d3",
+    "PhilRenderer": "0xD8c3e766f641F3210e835bC7FB7759c4AdEFcBf2",
+    "PhilWeb3": "0xaB4c81732892B2C2d33bba3BF24ae15f3A97B90c"
+  },
+  "dependencies": {
+    "factRegistry": "0x07ec0D28e50322Eb0C159B9090ecF3aeA8346DFe",
+    "PhilSVGStorage": "0x77C1A28296d39fb91F7575e85A4493E5036B8A4c",
+    "PhilLayerRegistry": "0x43d8367eC689548325775DC0606F92d7193D4863",
+    "PhilNFT": "0x0B0d8dE5C1d3ea3840C0951E9edcd4EA6F7d5585"
+  },
+  "config": {
+    "humanityProvider": "local-credential",
+    "programHash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+    "proofContext": "13",
+    "verifierConfigHash": "2131803849506581365406589335899085938050280523953039465507586542393204299861",
+    "artBackendReused": true,
+    "artBackendMode": "reuse-stable",
+    "artBackendManifest": "/Users/tylershome/Desktop/phil_replica_candidate/config/stable-art-backends/sepolia.json",
+    "artBackendSource": "/Users/tylershome/Desktop/phil_replica_candidate/config/stable-art-backends/sepolia.json",
+    "proofMode": "LOCAL_STWO_FACTS"
+  },
+  "expectedComponents": [
+    "PhilIdentityGate",
+    "PhilIdentityMint",
+    "humanityVerifier"
+  ],
+  "expectedDependencies": [
+    "factRegistry"
+  ],
+  "ProofGate": "0x0b574d1c282C64559912029A49971B06c7156851",
+  "PhilIdentityGate": "0x0b574d1c282C64559912029A49971B06c7156851",
+  "PhilIdentityMint": "0x8A5c32c0f45bFad715C812bc0B5DDEf12E6b4934",
+  "humanityVerifier": "0xB1757d86DA203B0801306670aa6Ec7dc6b7Ed6d3",
+  "FactRegistryHumanityVerifier": "0xB1757d86DA203B0801306670aa6Ec7dc6b7Ed6d3",
+  "PhilRenderer": "0xD8c3e766f641F3210e835bC7FB7759c4AdEFcBf2",
+  "PhilWeb3": "0xaB4c81732892B2C2d33bba3BF24ae15f3A97B90c",
+  "PhilSVGStorage": "0x77C1A28296d39fb91F7575e85A4493E5036B8A4c",
+  "PhilLayerRegistry": "0x43d8367eC689548325775DC0606F92d7193D4863",
+  "PhilNFT": "0x0B0d8dE5C1d3ea3840C0951E9edcd4EA6F7d5585",
+  "factRegistry": "0x07ec0D28e50322Eb0C159B9090ecF3aeA8346DFe",
+  "humanityProvider": "local-credential",
+  "programHash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+  "proofContext": "13",
+  "verifierConfigHash": "2131803849506581365406589335899085938050280523953039465507586542393204299861",
+  "artBackendReused": true,
+  "artBackendMode": "reuse-stable",
+  "artBackendManifest": "/Users/tylershome/Desktop/phil_replica_candidate/config/stable-art-backends/sepolia.json",
+  "artBackendSource": "/Users/tylershome/Desktop/phil_replica_candidate/config/stable-art-backends/sepolia.json",
+  "ProofMode": "LOCAL_STWO_FACTS",
+  "status": {
+    "classification": "complete",
+    "missingComponents": [],
+    "missingDependencies": [],
+    "placeholderConfig": [],
+    "invalidComponents": [],
+    "invalidDependencies": [],
+    "legacyFieldsPresent": [],
+    "compatibilityAliasesPresent": [
+      "ProofGate",
+      "FactRegistryHumanityVerifier"
+    ],
+    "blockers": []
+  }
+}

@@ -25,6 +25,7 @@ Mutable, redeployable infrastructure:
 - current deploy scripts write Sepolia/local mutable manifests as `zkphil-mutable-stack-v1`
 - those manifests separate `components`, `dependencies`, `config`, and computed `status`
 - status tooling still reads older flat manifests, but marks them as `legacy-flat-json` and surfaces alias resolution instead of treating them as fully current
+- on Sepolia today, the Stark-side mutable stack is deployed and tracked, while the 4337/account layer remains intentionally undeployed until the Starknet unlock bindings are real
 
 Deployment modes:
 

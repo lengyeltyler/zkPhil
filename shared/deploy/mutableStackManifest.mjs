@@ -377,6 +377,12 @@ function buildCompatibilityFields(stack, components, dependencies, config) {
   };
 }
 
+function pruneEmptyCompatibilityFields(fields) {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => hasValue(value))
+  );
+}
+
 export function getMutableStackManifestPath(stack, chainId, rootDir = ROOT_DIR) {
   const config = STACK_CONFIG[stack];
   if (!config) {
@@ -440,7 +446,7 @@ export function writeMutableStackManifest({
     config: normalizedConfig,
     expectedComponents: [...stackConfig.expectedComponents],
     expectedDependencies: [...stackConfig.expectedDependencies],
-    ...compatibilityFields,
+    ...pruneEmptyCompatibilityFields(compatibilityFields),
   };
 
   const analyzed = analyzeStructuredManifest(payload, stack, manifestPath);

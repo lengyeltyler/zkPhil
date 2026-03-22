@@ -272,6 +272,11 @@ This reports:
 - whether current values are coming from explicit env or mutable-manifest fallback
 - any legacy alias usage or stale fields still present in older manifests
 
+Today, the expected live state is:
+
+- Stark-side identity/proof stack: present and current
+- 4337/account stack: missing until real `STARKNET_CORE` and `L2_UNLOCK_VERIFIER` are configured
+
 For strict live verification with a usable Sepolia RPC and signer config:
 
 ```bash
@@ -285,3 +290,9 @@ npm run verify:sepolia
 - `PAYMASTER_SIGNER` or `PAYMASTER_SIGNER_KEY`
 - `STARKNET_CORE`
 - `L2_UNLOCK_VERIFIER`
+
+For read-only inspection, it is fine to override the RPC inline:
+
+```bash
+RPC_URL=https://ethereum-sepolia-rpc.publicnode.com npm run status:sepolia
+```

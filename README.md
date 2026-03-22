@@ -27,6 +27,8 @@ The active verifier bridge is still fact-registry-based.
 - Mutable identity/proof/account infrastructure still writes per-chain deployment manifests under `deployments/`, for example `stark_<chainId>.json` and `4337_<chainId>.json`.
 - Those mutable manifests now use `zkphil-mutable-stack-v1` when written by the current deploy scripts and split their contents into `components`, `dependencies`, `config`, and `status`.
 - `status:sepolia` also understands older flat manifests and will call them out as `legacy-flat-json`, `partial`, or alias-backed instead of pretending they are current.
+- The live current Sepolia identity/proof stack is now tracked in `deployments/stark_11155111.json`.
+- The Sepolia 4337/account layer is still intentionally absent from `deployments/4337_11155111.json` until real `STARKNET_CORE` and `L2_UNLOCK_VERIFIER` values exist.
 - Local helper runs reuse healthy local manifests when possible and only re-bootstrap the art backend when the local chain is fresh or the manifest is unhealthy.
 
 ## Active identity architecture
@@ -160,6 +162,12 @@ For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 
 `npm run status:sepolia` reports the stable reused art/data addresses, the mutable Stark and 4337 manifests, legacy alias usage, placeholder config, and whether live verification ran or was skipped.
 
+Current Sepolia truth:
+
+- `deployments/stark_11155111.json` is current and complete for the humanity-ready identity/proof stack
+- `deployments/4337_11155111.json` is still missing because the live unlock-bridge config is not yet available
+- `verify:sepolia` therefore still fails closed honestly
+
 The mutable Sepolia states are classified as:
 
 - `complete`
@@ -228,6 +236,6 @@ node --test test/sepolia-status.test.mjs
 - Cleanup report: [`CLEANUP_REPORT.md`](./CLEANUP_REPORT.md)
 - DEV runbook: [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 - Project status: [`PROJECT_STATUS_REPORT.md`](./PROJECT_STATUS_REPORT.md)
-- Sepolia cleanup report: [`SEPOLIA_STATUS_CLEANUP_REPORT.md`](./SEPOLIA_STATUS_CLEANUP_REPORT.md)
+- Repo modernization report: [`REPO_MODERNIZATION_REPORT.md`](./REPO_MODERNIZATION_REPORT.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)
 - Humanity-ready summary: [`HUMANITY_READY_SUMMARY.md`](./HUMANITY_READY_SUMMARY.md)

@@ -442,7 +442,7 @@ export function App() {
           <div className="mode-pill">Scroll Preview</div>
           <h1>zkPhil Sepolia Read-Only Browser</h1>
           <p className="subhead">
-            Infinite, deterministic previews from the legacy Phil renderer now backed by
+            Infinite, deterministic previews from the current Phil renderer now backed by
             `zkPhilLayers` on Sepolia. No wallet. No signing. No minting.
           </p>
         </div>
@@ -481,8 +481,8 @@ export function App() {
             <code>{SEPOLIA_PREVIEW_CONFIG.rendererAddress}</code>
           </div>
           <div className="address-card">
-            <span className="network-label">PhilTestMint</span>
-            <code>{SEPOLIA_PREVIEW_CONFIG.philTestMintAddress}</code>
+            <span className="network-label">PhilIdentityMint</span>
+            <code>{SEPOLIA_PREVIEW_CONFIG.philIdentityMintAddress}</code>
           </div>
           <div className="address-card">
             <span className="network-label">PhilWeb3</span>

@@ -10,7 +10,6 @@ import { buildLayerCatalog } from "../src/layer-catalog.mjs";
 import { registerCatalogToRegistry, uploadCatalogToStorage } from "../src/sepolia-pipeline.mjs";
 import { getStableArtBackendManifestPath } from "../shared/deploy/artBackendManifest.mjs";
 import {
-  DEPLOYMENTS_DIR,
   LAYER_CATALOG_PATH,
   REPO_ROOT,
   UPLOAD_MANIFEST_PATH,
@@ -30,8 +29,7 @@ const catalog = buildLayerCatalog();
 writeJson(LAYER_CATALOG_PATH, catalog);
 
 const stableArtManifestPath = getStableArtBackendManifestPath(network.chainId);
-const existingAddresses = readJson(stableArtManifestPath, null)
-  || readJson(path.join(DEPLOYMENTS_DIR, "sepolia-addresses.json"), null);
+const existingAddresses = readJson(stableArtManifestPath, null);
 const requestedSvgStorage = String(
   process.env.PHIL_SVG_STORAGE || existingAddresses?.contracts?.svgStorage || ""
 ).trim();

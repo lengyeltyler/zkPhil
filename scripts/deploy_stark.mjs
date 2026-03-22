@@ -275,7 +275,7 @@ export async function runDeployStark(config = readDeployStarkConfig(process.env)
   console.log('\n' + '='.repeat(60));
   console.log(config.dryRun ? 'DRY RUN COMPLETE' : 'DEPLOYMENT COMPLETE');
   console.log('='.repeat(60));
-  for (const [key, value] of Object.entries(starkDeployments)) {
+  for (const [key, value] of Object.entries(starkDeployments).filter(([, value]) => String(value ?? '').trim().length > 0)) {
     console.log(`  ${key}: ${value}`);
   }
   if (!config.dryRun) {
