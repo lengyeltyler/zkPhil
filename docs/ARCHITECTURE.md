@@ -16,6 +16,8 @@ Stable, reused infrastructure:
 
 - Sepolia trait/data contracts live in [`config/stable-art-backends/sepolia.json`](../config/stable-art-backends/sepolia.json).
 - Those stable addresses are the intended reuse base for `PhilSVGStorage`, `PhilLayerRegistry`, and `PhilNFT`.
+- Sepolia protocol bindings live in [`config/stable-protocol-bindings/sepolia.json`](../config/stable-protocol-bindings/sepolia.json).
+- Those stable protocol bindings are the intended reuse base for `EntryPoint v0.7` and `StarknetCore`.
 
 Mutable, redeployable infrastructure:
 
@@ -25,7 +27,7 @@ Mutable, redeployable infrastructure:
 - current deploy scripts write Sepolia/local mutable manifests as `zkphil-mutable-stack-v1`
 - those manifests separate `components`, `dependencies`, `config`, and computed `status`
 - status tooling still reads older flat manifests, but marks them as `legacy-flat-json` and surfaces alias resolution instead of treating them as fully current
-- on Sepolia today, the Stark-side mutable stack is deployed and tracked, while the 4337/account layer remains intentionally undeployed until the Starknet unlock bindings are real
+- on Sepolia today, the Stark-side mutable stack is deployed and tracked, the reusable protocol bindings are tracked, and the 4337/account layer remains intentionally undeployed until the app-specific Starknet unlock verifier is real
 
 Deployment modes:
 
@@ -152,7 +154,8 @@ Dev helper behavior:
 - `npm run smoke:local` wraps helper bring-up, readiness checks, the mock-humanity flow, deterministic assertions, and teardown
 - `npm run status:sepolia` reports the stable reuse boundary and mutable Sepolia manifests in one place
 - `npm run status:sepolia` now classifies the mutable Sepolia layers as `complete`, `partial`, `missing`, or `placeholder-configured`
-- `npm run verify:sepolia` can resolve `paymasterSigner`, `starknetCore`, and `l2UnlockVerifier` from the mutable 4337 manifest when that manifest is complete
+- `npm run verify:sepolia` can resolve `paymasterSigner` and `l2UnlockVerifier` from the mutable 4337 manifest when that manifest is complete
+- `npm run status:sepolia` and `npm run verify:sepolia` can already resolve `EntryPoint v0.7` and `StarknetCore` from `config/stable-protocol-bindings/sepolia.json`
 - local helper runs pin Node 22 for backend/prover/bootstrap work even when the interactive shell defaults to an older Node
 - proof bundles live under `generated/proofs/` so compiler output cleanup does not erase them
 

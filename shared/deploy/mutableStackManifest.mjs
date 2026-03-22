@@ -6,6 +6,7 @@ import { ethers } from 'ethers';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
+const LOCAL_CHAIN_ID = 31337;
 
 export const MUTABLE_STACK_IDENTITY_PROOF = 'identity-proof';
 export const MUTABLE_STACK_ACCOUNT_ABSTRACTION = 'account-abstraction';
@@ -109,6 +110,11 @@ function looksLikePlaceholder(value) {
     normalized.includes('rpc.example') ||
     normalized.includes('example')
   );
+}
+
+function looksLikeZeroUint(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '0' || normalized === '0x0' || normalized === '0x00';
 }
 
 function looksLikeAddress(value) {
@@ -270,6 +276,20 @@ function analyzeStructuredManifest(rawManifest, stack, manifestPath) {
     looksLikePlaceholder(normalized.config[key])
   );
 
+  const manifestChainId = Number(rawManifest.chainId || 0) || null;
+  if (stack === MUTABLE_STACK_ACCOUNT_ABSTRACTION) {
+    if (!placeholderConfig.includes('l2UnlockVerifier') && looksLikeZeroUint(normalized.config.l2UnlockVerifier)) {
+      placeholderConfig.push('l2UnlockVerifier');
+    }
+    if (
+      manifestChainId !== LOCAL_CHAIN_ID &&
+      normalized.config.useMockInbox === true &&
+      !placeholderConfig.includes('useMockInbox')
+    ) {
+      placeholderConfig.push('useMockInbox');
+    }
+  }
+
   const blockers = [];
   for (const key of missingComponents) {
     blockers.push(`Missing component ${key}.`);
@@ -285,6 +305,13 @@ function analyzeStructuredManifest(rawManifest, stack, manifestPath) {
   }
   for (const key of placeholderConfig) {
     blockers.push(`Config ${key} is missing or placeholder-configured.`);
+  }
+  if (
+    stack === MUTABLE_STACK_ACCOUNT_ABSTRACTION &&
+    manifestChainId !== LOCAL_CHAIN_ID &&
+    normalized.config.useMockInbox === true
+  ) {
+    blockers.push('Config useMockInbox=true is DEV/TEST ONLY and may not be used on public chains.');
   }
   if (
     rawManifest.ProofMode &&

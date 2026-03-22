@@ -19,9 +19,12 @@
  *   PAYMASTER_SIGNER_KEY     - Private key for paymaster sponsorship signing
  *                              (required for live non-local deployment)
  *   STARKNET_CORE            - Starknet L1 core contract address
+ *                              (optional on Sepolia; falls back to config/stable-protocol-bindings/sepolia.json)
  *   L2_UNLOCK_VERIFIER       - Starknet L2 verifier contract address (felt)
+ *                              (still required for honest live Sepolia/public-chain deployment)
  *   PAYMASTER_DEPOSIT        - ETH to deposit for gas sponsorship (default: "0.5")
  *   REUSE_4337_DEPLOYMENTS   - Reuse deployments/4337_<chainId>.json instead of redeploying
+ *   MOCK_UNLOCK_INBOX        - DEV/TEST ONLY local mock inbox mode (chainId 31337 or dry-run only)
  *   DRY_RUN                  - Print the full deployment plan without broadcasting
  */
 
@@ -44,13 +47,16 @@ import {
   MUTABLE_STACK_ACCOUNT_ABSTRACTION,
   writeMutableStackManifest,
 } from '../shared/deploy/mutableStackManifest.mjs';
+import {
+  ENTRY_POINT_V07,
+  LOCAL_ENTRY_POINT_V07,
+  readStableProtocolBindings,
+} from '../shared/deploy/protocolBindings.mjs';
 import { logTx, waitForReceiptWithTimeout } from './sepolia/txutil.mjs';
 import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const ENTRY_POINT_V07 = '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
-const LOCAL_ENTRY_POINT_V07 = '0x1000000000000000000000000000000000000001';
+const ROOT_DIR = path.resolve(__dirname, '..');
 const LOCAL_CHAIN_ID = 31337;
 const MAINNET_CHAIN_ID = 1;
 const SEPOLIA_CHAIN_ID = 11155111;
@@ -296,10 +302,16 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
     : null;
 
   const isLocalChain = chainId === LOCAL_CHAIN_ID;
+  const stableProtocolBindings = readStableProtocolBindings({
+    chainId,
+    rootDir: ROOT_DIR,
+  });
   if (!config.dryRun && !isLocalChain && rawWallet.privateKey.toLowerCase() === DEFAULT_DRY_RUN_PRIVATE_KEY) {
     throw new Error('Live non-local deployment refuses the default Hardhat private key. Set PRIVATE_KEY explicitly.');
   }
-  const entryPointAddress = isLocalChain ? LOCAL_ENTRY_POINT_V07 : ENTRY_POINT_V07;
+  const entryPointAddress = isLocalChain
+    ? LOCAL_ENTRY_POINT_V07
+    : (stableProtocolBindings?.entryPointV07Address || ENTRY_POINT_V07);
 
   if (isLocalChain) {
     const existingEntryPointCode = await getCodeRaw(provider, entryPointAddress);
@@ -390,19 +402,47 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
 
   let useMockInbox = config.useMockInbox;
   let starknetCore = looksLikePlaceholder(config.starknetCore) ? '' : config.starknetCore;
+  if (!starknetCore && !useMockInbox) {
+    starknetCore = stableProtocolBindings?.starknetCoreAddress || '';
+  }
   let l2UnlockVerifier = looksLikePlaceholder(config.l2UnlockVerifier) ? '' : config.l2UnlockVerifier;
+  if (String(l2UnlockVerifier).trim() === '0') {
+    l2UnlockVerifier = '';
+  }
+  if (useMockInbox && !isLocalChain && !config.dryRun) {
+    throw new Error(
+      'MOCK_UNLOCK_INBOX is DEV/TEST ONLY and may only be used on chainId 31337. ' +
+      'Live Sepolia/mainnet deployment requires a real Starknet core + L2 unlock verifier.'
+    );
+  }
   if (useMockInbox) {
     starknetCore = '';
     l2UnlockVerifier = '0';
   }
-  if (!useMockInbox && (!starknetCore || !l2UnlockVerifier)) {
+  if (!useMockInbox && !starknetCore) {
     if (!config.dryRun) {
-      throw new Error('STARKNET_CORE and L2_UNLOCK_VERIFIER must be set.');
+      throw new Error(
+        `STARKNET_CORE is unresolved for chain ${chainId}. ` +
+        'Provide STARKNET_CORE explicitly or track a stable protocol binding manifest first.'
+      );
     }
     useMockInbox = true;
     l2UnlockVerifier = '0';
     console.log(
-      'DRY_RUN: STARKNET_CORE and L2_UNLOCK_VERIFIER are not set. Planning with a functional MockStarknetCore.'
+      'DRY_RUN: STARKNET_CORE is unresolved. Planning with a functional MockStarknetCore.'
+    );
+  }
+  if (!useMockInbox && !l2UnlockVerifier) {
+    if (!config.dryRun) {
+      throw new Error(
+        'L2_UNLOCK_VERIFIER must be set to a real Starknet verifier contract felt before live 4337 deployment. ' +
+        'The Sepolia Starknet core is reusable, but the app-specific L2 unlock verifier is still untracked.'
+      );
+    }
+    useMockInbox = true;
+    l2UnlockVerifier = '0';
+    console.log(
+      'DRY_RUN: L2_UNLOCK_VERIFIER is unresolved. Planning with a functional MockStarknetCore.'
     );
   }
 

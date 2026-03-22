@@ -13,6 +13,11 @@ import {
   readMutableStackManifest,
 } from '../../shared/deploy/mutableStackManifest.mjs';
 import {
+  getStableProtocolBindingsManifestPath,
+  inspectStableProtocolBindings,
+  readStableProtocolBindings,
+} from '../../shared/deploy/protocolBindings.mjs';
+import {
   readVerifySepoliaBindingsConfig,
   runVerifySepoliaBindings,
 } from '../verify_sepolia_bindings.mjs';
@@ -70,6 +75,10 @@ function describeValueState(label, value) {
   };
 }
 
+function usableEnvValue(value) {
+  return looksLikePlaceholder(value) ? '' : String(value || '').trim();
+}
+
 function summarizeSchema(manifest) {
   if (!manifest.exists) {
     return 'missing';
@@ -97,6 +106,13 @@ function readStableArtManifest(rootDir = ROOT_DIR) {
   };
 }
 
+function readStableProtocolManifest(rootDir = ROOT_DIR) {
+  return readStableProtocolBindings({
+    chainId: SEPOLIA_CHAIN_ID,
+    rootDir,
+  });
+}
+
 function describeResolvedValueState(label, value, source) {
   const raw = String(value || '').trim();
   return {
@@ -121,19 +137,23 @@ function derivePaymasterSignerAddressFromKey(privateKey) {
   }
 }
 
-function buildResolvedEnvStatus(env, aaDeployment) {
+function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
   const explicitRpcUrl = String(env.RPC_URL || '').trim();
   const fallbackRpcUrl = String(env.RPC_URL_SEPOLIA || '').trim();
 
-  const explicitPaymasterSigner = String(env.PAYMASTER_SIGNER || '').trim();
+  const explicitPaymasterSigner = usableEnvValue(env.PAYMASTER_SIGNER);
   const paymasterSignerFromKey = derivePaymasterSignerAddressFromKey(env.PAYMASTER_SIGNER_KEY);
   const manifestPaymasterSigner = aaDeployment.config.paymasterSigner || '';
 
-  const explicitStarknetCore = String(env.STARKNET_CORE || '').trim();
+  const explicitStarknetCore = usableEnvValue(env.STARKNET_CORE);
   const manifestStarknetCore = aaDeployment.config.starknetCore || '';
+  const stableStarknetCore = stableProtocol?.starknetCoreAddress || '';
 
-  const explicitL2UnlockVerifier = String(env.L2_UNLOCK_VERIFIER || '').trim();
+  const explicitL2UnlockVerifier = usableEnvValue(env.L2_UNLOCK_VERIFIER);
   const manifestL2UnlockVerifier = aaDeployment.config.l2UnlockVerifier || '';
+  const explicitEntryPoint = usableEnvValue(env.ENTRY_POINT_V07);
+  const manifestEntryPoint = aaDeployment.dependencies.EntryPoint || '';
+  const stableEntryPoint = stableProtocol?.entryPointV07Address || '';
 
   return {
     configuredChainId: describeResolvedValueState(
@@ -158,14 +178,27 @@ function buildResolvedEnvStatus(env, aaDeployment) {
             : 'missing'))
     ),
     paymasterSignerKey: describeValueState('PAYMASTER_SIGNER_KEY', env.PAYMASTER_SIGNER_KEY),
+    entryPoint: describeResolvedValueState(
+      'ENTRY_POINT_V07',
+      explicitEntryPoint || manifestEntryPoint || stableEntryPoint,
+      explicitEntryPoint
+        ? 'env:ENTRY_POINT_V07'
+        : (manifestEntryPoint
+        ? `manifest:${aaDeployment.manifestPath}#dependencies.EntryPoint`
+        : (stableEntryPoint
+          ? `stable:${stableProtocol.filePath}#contracts.entryPointV07`
+          : 'missing'))
+    ),
     starknetCore: describeResolvedValueState(
       'STARKNET_CORE',
-      explicitStarknetCore || manifestStarknetCore,
+      explicitStarknetCore || manifestStarknetCore || stableStarknetCore,
       explicitStarknetCore
         ? 'env:STARKNET_CORE'
         : (manifestStarknetCore
           ? `manifest:${aaDeployment.manifestPath}#config.starknetCore`
-          : 'missing')
+          : (stableStarknetCore
+            ? `stable:${stableProtocol.filePath}#contracts.starknetCore`
+            : 'missing'))
     ),
     l2UnlockVerifier: describeResolvedValueState(
       'L2_UNLOCK_VERIFIER',
@@ -270,6 +303,7 @@ export async function collectSepoliaStatus(
 ) {
   const effectiveEnv = buildEffectiveEnv(env);
   const stableArt = readStableArtManifest(rootDir);
+  const stableProtocol = readStableProtocolManifest(rootDir);
   const stark = summarizeMutableStack(
     readMutableStackManifest({
       stack: MUTABLE_STACK_IDENTITY_PROOF,
@@ -285,7 +319,7 @@ export async function collectSepoliaStatus(
     })
   );
 
-  const envStatus = buildResolvedEnvStatus(env, aa4337);
+  const envStatus = buildResolvedEnvStatus(env, aa4337, stableProtocol);
 
   const warnings = [];
   const errors = [];
@@ -295,6 +329,9 @@ export async function collectSepoliaStatus(
   }
   if (!stableArt) {
     warnings.push(`Stable art/data manifest is missing at ${getStableManifestPath(rootDir)}.`);
+  }
+  if (!stableProtocol) {
+    warnings.push(`Stable Sepolia protocol bindings are missing at ${getStableProtocolBindingsManifestPath(SEPOLIA_CHAIN_ID, rootDir)}.`);
   }
   if (!stark.exists) {
     warnings.push(`Mutable identity/proof manifest is missing at ${stark.manifestPath}.`);
@@ -329,10 +366,27 @@ export async function collectSepoliaStatus(
     warnings.push('PAYMASTER_SIGNER, PAYMASTER_SIGNER_KEY, or 4337 manifest paymasterSigner is missing; paymaster verification cannot run live.');
   }
   if (!envStatus.starknetCore.usable) {
-    warnings.push('STARKNET_CORE is missing or placeholder and no mutable 4337 manifest fallback is available.');
+    warnings.push('STARKNET_CORE is unresolved. status:sepolia checks env, then deployments/4337_11155111.json, then config/stable-protocol-bindings/sepolia.json.');
   }
   if (!envStatus.l2UnlockVerifier.usable) {
-    warnings.push('L2_UNLOCK_VERIFIER is missing or placeholder and no mutable 4337 manifest fallback is available.');
+    warnings.push('L2_UNLOCK_VERIFIER is missing or placeholder. No app-specific Starknet unlock verifier is currently tracked for Sepolia.');
+  }
+
+  let stableProtocolVerification = null;
+  if (stableProtocol && envStatus.rpcUrl.usable) {
+    try {
+      const provider = new ethers.JsonRpcProvider(envStatus.rpcUrl.value, undefined, { batchMaxCount: 1 });
+      stableProtocolVerification = await inspectStableProtocolBindings(provider, stableProtocol);
+      if (!stableProtocolVerification.ok) {
+        warnings.push(
+          `Stable Sepolia protocol bindings point to addresses without code (${stableProtocolVerification.missing.join(', ')}).`
+        );
+      }
+    } catch (error) {
+      warnings.push(
+        `Stable Sepolia protocol binding inspection failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   let configStatus = {
@@ -351,6 +405,7 @@ export async function collectSepoliaStatus(
         philAccountFactoryAddress: config.philAccountFactoryAddress,
         paymasterAddress: config.paymasterAddress,
         factRegistryAddress: config.factRegistryAddress,
+        entryPointAddress: config.entryPointAddress,
         paymasterSignerAddress: config.paymasterSignerAddress,
         starknetCoreAddress: config.starknetCoreAddress,
         l2UnlockVerifier: config.l2UnlockVerifier.toString(),
@@ -409,6 +464,20 @@ export async function collectSepoliaStatus(
         : {},
       verification: stableArt?.raw?.verification || null,
     },
+    protocol: {
+      kind: 'stable-protocol-bindings',
+      manifestPath: stableProtocol?.filePath || getStableProtocolBindingsManifestPath(SEPOLIA_CHAIN_ID, rootDir),
+      exists: Boolean(stableProtocol),
+      source: stableProtocol?.source || '',
+      contracts: stableProtocol
+        ? {
+            entryPointV07: stableProtocol.entryPointV07Address,
+            starknetCore: stableProtocol.starknetCoreAddress,
+          }
+        : {},
+      notes: stableProtocol?.notes || {},
+      verification: stableProtocolVerification,
+    },
     mutable: {
       identityProof: stark,
       accountAbstraction: aa4337,
@@ -418,7 +487,7 @@ export async function collectSepoliaStatus(
     config: configStatus,
     liveVerification,
     expectations: {
-      reused: ['config/stable-art-backends/sepolia.json'],
+      reused: ['config/stable-art-backends/sepolia.json', 'config/stable-protocol-bindings/sepolia.json'],
       redeployed: ['deployments/stark_11155111.json', 'deployments/4337_11155111.json'],
     },
     warnings,
@@ -466,6 +535,19 @@ export function printSepoliaStatus(status) {
     printAddress('PhilLayerRegistry', status.reused.contracts.layerRegistry);
     printAddress('PhilNFT', status.reused.contracts.philNft);
     if (status.reused.verification?.verified) {
+      console.log('  Verification: verified');
+    }
+  }
+
+  console.log('\nStable reused protocol bindings');
+  console.log(`  Manifest: ${status.protocol.exists ? 'ok' : 'missing'} (${status.protocol.manifestPath})`);
+  if (status.protocol.exists) {
+    printAddress('EntryPointV07', status.protocol.contracts.entryPointV07);
+    printAddress('StarknetCore', status.protocol.contracts.starknetCore);
+    if (status.protocol.notes?.l2UnlockVerifier) {
+      console.log(`  Note: ${status.protocol.notes.l2UnlockVerifier}`);
+    }
+    if (status.protocol.verification?.ok) {
       console.log('  Verification: verified');
     }
   }
@@ -557,6 +639,7 @@ export function printSepoliaStatus(status) {
 
   console.log('\nResolved config');
   console.log(`  RPC_URL: ${status.env.rpcUrl.usable ? `usable via ${status.env.rpcUrl.source}` : 'missing-or-placeholder'}`);
+  console.log(`  ENTRY_POINT_V07: ${status.env.entryPoint.usable ? `usable via ${status.env.entryPoint.source}` : 'missing-or-placeholder'}`);
   console.log(`  PAYMASTER_SIGNER: ${status.env.paymasterSignerAddress.usable ? `usable via ${status.env.paymasterSignerAddress.source}` : 'missing-or-placeholder'}`);
   console.log(`  STARKNET_CORE: ${status.env.starknetCore.usable ? `usable via ${status.env.starknetCore.source}` : 'missing-or-placeholder'}`);
   console.log(`  L2_UNLOCK_VERIFIER: ${status.env.l2UnlockVerifier.usable ? `usable via ${status.env.l2UnlockVerifier.source}` : 'missing-or-placeholder'}`);

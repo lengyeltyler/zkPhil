@@ -92,6 +92,46 @@ test('writeMutableStackManifest emits a complete structured 4337 manifest', () =
   assert.deepEqual(manifest.blockers, []);
 });
 
+test('readMutableStackManifest marks non-local mock inbox 4337 manifests as placeholder-configured', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-mutable-stack-'));
+
+  writeJson(path.join(tempRoot, 'deployments', '4337_11155111.json'), {
+    schema: 'zkphil-mutable-stack-v1',
+    stack: 'account-abstraction',
+    chainId: 11155111,
+    components: {
+      PhilAccountFactory: '0x1000000000000000000000000000000000000001',
+      PhilPaymaster: '0x2000000000000000000000000000000000000002',
+      PhilUnlockInbox: '0x3000000000000000000000000000000000000003',
+      MockStarknetCore: '0x4000000000000000000000000000000000000004',
+    },
+    dependencies: {
+      PhilIdentityMint: '0x5000000000000000000000000000000000000005',
+      PhilIdentityGate: '0x6000000000000000000000000000000000000006',
+      EntryPoint: '0x7000000000000000000000000000000000000007',
+    },
+    config: {
+      paymasterSigner: '0x8000000000000000000000000000000000000008',
+      starknetCore: '0x4000000000000000000000000000000000000004',
+      l2UnlockVerifier: '0',
+      useMockInbox: true,
+    },
+  });
+
+  const manifest = readMutableStackManifest({
+    stack: MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+    chainId: 11155111,
+    rootDir: tempRoot,
+  });
+
+  assert.equal(manifest.classification, 'placeholder-configured');
+  assert.deepEqual(manifest.placeholderConfig, ['l2UnlockVerifier', 'useMockInbox']);
+  assert.match(
+    manifest.blockers.join('\n'),
+    /useMockInbox=true is DEV\/TEST ONLY/
+  );
+});
+
 test('writeMutableStackManifest omits empty inactive verifier aliases from identity-proof manifests', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-mutable-stack-'));
 

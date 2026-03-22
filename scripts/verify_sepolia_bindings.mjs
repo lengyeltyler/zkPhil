@@ -9,10 +9,28 @@ import {
   MUTABLE_STACK_IDENTITY_PROOF,
   readMutableStackManifest,
 } from '../shared/deploy/mutableStackManifest.mjs';
+import {
+  readStableProtocolBindings,
+} from '../shared/deploy/protocolBindings.mjs';
 
 const DEFAULT_CHAIN_ID = 11155111;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
+
+function looksLikePlaceholder(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized.includes('your_') ||
+    normalized.includes('placeholder') ||
+    normalized.includes('rpc.example') ||
+    normalized.includes('example')
+  );
+}
+
+function usableEnvValue(value) {
+  return looksLikePlaceholder(value) ? '' : String(value || '').trim();
+}
 
 function requireAddress(label, value) {
   const trimmed = String(value || '').trim();
@@ -23,26 +41,33 @@ function requireAddress(label, value) {
   return ethers.getAddress(trimmed);
 }
 
-function requireUint256(label, value) {
+function requireUint256(label, value, { allowZero = true } = {}) {
   const trimmed = String(value || '').trim();
   if (!trimmed) {
     throw new Error(`${label} must be set.`);
   }
 
   try {
-    return BigInt(trimmed);
+    const parsed = BigInt(trimmed);
+    if (!allowZero && parsed === 0n) {
+      throw new Error(`${label} must be set to a non-zero Starknet contract felt.`);
+    }
+    return parsed;
   } catch {
+    if (!allowZero && String(trimmed) === '0') {
+      throw new Error(`${label} must be set to a non-zero Starknet contract felt.`);
+    }
     throw new Error(`${label} must be a uint256-compatible integer.`);
   }
 }
 
 function resolveSignerAddress(env, options) {
-  const explicitAddress = String(env[options.addressEnvKey] || '').trim();
+  const explicitAddress = usableEnvValue(env[options.addressEnvKey]);
   if (explicitAddress) {
     return requireAddress(options.addressEnvKey, explicitAddress);
   }
 
-  const privateKey = String(env[options.privateKeyEnvKey] || '').trim();
+  const privateKey = usableEnvValue(env[options.privateKeyEnvKey]);
   if (privateKey) {
     return new ethers.Wallet(privateKey).address;
   }
@@ -89,49 +114,102 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
     chainId: configuredChainId,
     rootDir,
   });
+  const stableProtocolBindings = readStableProtocolBindings({
+    chainId: configuredChainId,
+    rootDir,
+  });
+  const proofGateOverride = usableEnvValue(env.PROOF_GATE);
+  const philIdentityMintOverride = usableEnvValue(env.PHIL_IDENTITY_MINT);
+  const philAccountFactoryOverride = usableEnvValue(env.PHIL_ACCOUNT_FACTORY);
+  const paymasterOverride = usableEnvValue(env.PHIL_PAYMASTER);
+  const factRegistryOverride = usableEnvValue(env.FACT_REGISTRY);
+  const entryPointOverride = usableEnvValue(env.ENTRY_POINT_V07);
+  const starknetCoreOverride = usableEnvValue(env.STARKNET_CORE);
+  const l2UnlockVerifierOverride = usableEnvValue(env.L2_UNLOCK_VERIFIER);
 
-  return {
+  const errors = [];
+  function resolveAddress(label, value) {
+    try {
+      return requireAddress(label, value);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      return '';
+    }
+  }
+  function resolveUint256(label, value, options) {
+    try {
+      return requireUint256(label, value, options);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
+
+  const config = {
     rpcUrl,
     configuredChainId,
-    proofGateAddress: requireAddress(
+    proofGateAddress: resolveAddress(
       'PROOF_GATE',
-      env.PROOF_GATE ||
+      proofGateOverride ||
         starkDeployment.components.PhilIdentityGate ||
         aaDeployment.dependencies.PhilIdentityGate
     ),
-    philIdentityMintAddress: requireAddress(
+    philIdentityMintAddress: resolveAddress(
       'PHIL_IDENTITY_MINT',
-      env.PHIL_IDENTITY_MINT ||
+      philIdentityMintOverride ||
         starkDeployment.components.PhilIdentityMint ||
         aaDeployment.dependencies.PhilIdentityMint
     ),
-    philAccountFactoryAddress: requireAddress(
+    philAccountFactoryAddress: resolveAddress(
       'PHIL_ACCOUNT_FACTORY',
-      env.PHIL_ACCOUNT_FACTORY || aaDeployment.components.PhilAccountFactory
+      philAccountFactoryOverride || aaDeployment.components.PhilAccountFactory
     ),
-    paymasterAddress: requireAddress(
+    paymasterAddress: resolveAddress(
       'PHIL_PAYMASTER',
-      env.PHIL_PAYMASTER || aaDeployment.components.PhilPaymaster
+      paymasterOverride || aaDeployment.components.PhilPaymaster
     ),
-    factRegistryAddress: requireAddress(
+    factRegistryAddress: resolveAddress(
       'FACT_REGISTRY',
-      env.FACT_REGISTRY || starkDeployment.dependencies.factRegistry
+      factRegistryOverride || starkDeployment.dependencies.factRegistry
     ),
-    paymasterSignerAddress: resolveSignerAddress(env, {
+    entryPointAddress: resolveAddress(
+      'ENTRY_POINT_V07',
+      entryPointOverride ||
+        aaDeployment.dependencies.EntryPoint ||
+        stableProtocolBindings?.entryPointV07Address ||
+        ''
+    ),
+    paymasterSignerAddress: '',
+    starknetCoreAddress: resolveAddress(
+      'STARKNET_CORE',
+      starknetCoreOverride ||
+        aaDeployment.config.starknetCore ||
+        stableProtocolBindings?.starknetCoreAddress ||
+        ''
+    ),
+    l2UnlockVerifier: resolveUint256(
+      'L2_UNLOCK_VERIFIER',
+      l2UnlockVerifierOverride || aaDeployment.config.l2UnlockVerifier,
+      { allowZero: false }
+    ),
+  };
+
+  try {
+    config.paymasterSignerAddress = resolveSignerAddress(env, {
       label: 'PhilPaymaster.verifyingSigner()',
       addressEnvKey: 'PAYMASTER_SIGNER',
       privateKeyEnvKey: 'PAYMASTER_SIGNER_KEY',
       fallbackAddress: aaDeployment.config.paymasterSigner || '',
-    }),
-    starknetCoreAddress: requireAddress(
-      'STARKNET_CORE',
-      env.STARKNET_CORE || aaDeployment.config.starknetCore
-    ),
-    l2UnlockVerifier: requireUint256(
-      'L2_UNLOCK_VERIFIER',
-      env.L2_UNLOCK_VERIFIER || aaDeployment.config.l2UnlockVerifier
-    ),
-  };
+    });
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '));
+  }
+
+  return config;
 }
 
 async function assertContractCode(provider, label, address) {
@@ -187,6 +265,7 @@ export async function runVerifySepoliaBindings(
     const paymaster = new ethers.Contract(
       config.paymasterAddress,
       [
+        'function entryPoint() view returns (address)',
         'function verifyingSigner() view returns (address)',
         'function philIdentityMint() view returns (address)',
       ],
@@ -197,6 +276,7 @@ export async function runVerifySepoliaBindings(
     const onchainFactoryProofGate = ethers.getAddress(await factory.proofGate());
     const onchainFactoryPhilIdentityMint = ethers.getAddress(await factory.philIdentityMint());
     const onchainUnlockInbox = ethers.getAddress(await factory.unlockInbox());
+    const onchainPaymasterEntryPoint = ethers.getAddress(await paymaster.entryPoint());
     const onchainPaymasterSigner = ethers.getAddress(await paymaster.verifyingSigner());
     const onchainPaymasterPhilIdentityMint = ethers.getAddress(await paymaster.philIdentityMint());
 
@@ -238,6 +318,11 @@ export async function runVerifySepoliaBindings(
       onchainFactoryPhilIdentityMint
     );
     assertAddressMatch(
+      'PHIL_PAYMASTER.entryPoint()',
+      config.entryPointAddress,
+      onchainPaymasterEntryPoint
+    );
+    assertAddressMatch(
       'PHIL_PAYMASTER.verifyingSigner()',
       config.paymasterSignerAddress,
       onchainPaymasterSigner
@@ -265,6 +350,7 @@ export async function runVerifySepoliaBindings(
     console.log(`  PHIL_ACCOUNT_FACTORY.proofGate(): ${onchainFactoryProofGate}`);
     console.log(`  PHIL_ACCOUNT_FACTORY.philIdentityMint(): ${onchainFactoryPhilIdentityMint}`);
     console.log(`  PHIL_ACCOUNT_FACTORY.unlockInbox(): ${onchainUnlockInbox}`);
+    console.log(`  PHIL_PAYMASTER.entryPoint(): ${onchainPaymasterEntryPoint}`);
     console.log(`  PHIL_PAYMASTER.verifyingSigner(): ${onchainPaymasterSigner}`);
     console.log(`  PHIL_PAYMASTER.philIdentityMint(): ${onchainPaymasterPhilIdentityMint}`);
     console.log(`  PhilUnlockInbox.starknetCore(): ${onchainStarknetCore}`);

@@ -43,9 +43,10 @@ Retained because they still provide real compatibility value:
 - mutable Stark and 4337 manifests now write `zkphil-mutable-stack-v1`
 - the current structured layout separates `components`, `dependencies`, `config`, and `status`
 - `status:sepolia` still reads older flat manifests but labels them `legacy-flat-json` and surfaces alias-backed fields explicitly
-- `verify:sepolia` can now resolve `paymasterSigner`, `starknetCore`, and `l2UnlockVerifier` from a complete `deployments/4337_<chainId>.json`
+- `verify:sepolia` can resolve `paymasterSigner` and `l2UnlockVerifier` from a complete `deployments/4337_<chainId>.json`
+- `status:sepolia` and `verify:sepolia` can now resolve `EntryPoint v0.7` and `StarknetCore` from `config/stable-protocol-bindings/sepolia.json`
 - the live Sepolia Stark-side identity/proof stack has now been redeployed into the current humanity-ready layout and tracked in `deployments/stark_11155111.json`
-- the Sepolia 4337 layer still remains pending real Starknet unlock config, so `verify:sepolia` continues to fail closed honestly
+- the Sepolia 4337 layer still remains pending a real app-specific Starknet unlock verifier, so `verify:sepolia` continues to fail closed honestly
 
 ## Mock-humanity additions
 

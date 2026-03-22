@@ -266,6 +266,7 @@ npm run status:sepolia
 This reports:
 
 - stable reused art/data from `config/stable-art-backends/sepolia.json`
+- stable reused protocol bindings from `config/stable-protocol-bindings/sepolia.json`
 - mutable identity/proof state from `deployments/stark_11155111.json`
 - mutable 4337/account state from `deployments/4337_11155111.json`
 - whether a mutable manifest is `complete`, `partial`, `missing`, or `placeholder-configured`
@@ -275,7 +276,8 @@ This reports:
 Today, the expected live state is:
 
 - Stark-side identity/proof stack: present and current
-- 4337/account stack: missing until real `STARKNET_CORE` and `L2_UNLOCK_VERIFIER` are configured
+- stable EntryPoint/Starknet core bindings: present and reused
+- 4337/account stack: still blocked until a real app-specific `L2_UNLOCK_VERIFIER` is tracked
 
 For strict live verification with a usable Sepolia RPC and signer config:
 
@@ -288,8 +290,10 @@ npm run verify:sepolia
 - `PHIL_ACCOUNT_FACTORY`
 - `PHIL_PAYMASTER`
 - `PAYMASTER_SIGNER` or `PAYMASTER_SIGNER_KEY`
-- `STARKNET_CORE`
 - `L2_UNLOCK_VERIFIER`
+
+`STARKNET_CORE` now normally resolves from `config/stable-protocol-bindings/sepolia.json`.
+Override it only if you are deliberately verifying against a different Starknet core contract.
 
 For read-only inspection, it is fine to override the RPC inline:
 

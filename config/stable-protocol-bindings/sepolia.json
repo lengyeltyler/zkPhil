@@ -1,0 +1,17 @@
+{
+  "schema": "zkphil-stable-protocol-bindings-v1",
+  "chainId": 11155111,
+  "stable": true,
+  "source": "Starknet Sepolia chain info + canonical ERC-4337 EntryPoint v0.7",
+  "contracts": {
+    "entryPointV07": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+    "starknetCore": "0xE2Bb56ee936fd6433DC0F6e7e3b8365C906AA057"
+  },
+  "notes": {
+    "l2UnlockVerifier": "App-specific Starknet verifier contract. It must be deployed and tracked separately before live Sepolia 4337 deployment can be completed honestly."
+  },
+  "references": [
+    "https://docs.starknet.io/resources/chain-info",
+    "https://eips.ethereum.org/EIPS/eip-4337"
+  ]
+}
