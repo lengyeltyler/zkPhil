@@ -22,7 +22,7 @@ function writeStableProtocolBindings(tempRoot) {
       starknetCore: '0xD00000000000000000000000000000000000000D',
     },
     notes: {
-      l2UnlockVerifier: 'deploy app-specific verifier separately',
+      l2UnlockSender: 'deploy app-specific Starknet sender separately',
     },
   });
 }
@@ -57,7 +57,7 @@ test('collectSepoliaStatus reports reused and mutable manifests without requirin
     EntryPoint: '0xB00000000000000000000000000000000000000B',
     paymasterSigner: '0xC00000000000000000000000000000000000000C',
     starknetCore: '0xD00000000000000000000000000000000000000D',
-    l2UnlockVerifier: '0x1234',
+    l2UnlockSender: '0x1234',
   });
 
   const status = await collectSepoliaStatus(
@@ -65,7 +65,7 @@ test('collectSepoliaStatus reports reused and mutable manifests without requirin
       RPC_URL_SEPOLIA: 'https://rpc.example',
       PAYMASTER_SIGNER: '0xE00000000000000000000000000000000000000E',
       STARKNET_CORE: '0xF00000000000000000000000000000000000000F',
-      L2_UNLOCK_VERIFIER: '0x1234',
+      L2_UNLOCK_SENDER: '0x1234',
     },
     tempRoot,
     { requireLive: false }
@@ -97,6 +97,52 @@ test('collectSepoliaStatus fails when live verification is required but env is i
   assert.equal(status.mutable.overallClassification, 'missing');
   assert.equal(status.liveVerification.skipped, true);
   assert.ok(status.errors.length > 0);
+});
+
+test('collectSepoliaStatus accepts the legacy L2 unlock verifier env alias as compatibility input', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-sepolia-status-'));
+
+  writeJson(path.join(tempRoot, 'config', 'stable-art-backends', 'sepolia.json'), {
+    schema: 'zkphil-stable-art-backend-v1',
+    chainId: 11155111,
+    stable: true,
+    source: 'stable sepolia',
+    contracts: {
+      svgStorage: '0x1000000000000000000000000000000000000001',
+      layerRegistry: '0x2000000000000000000000000000000000000002',
+      philNft: '0x3000000000000000000000000000000000000003',
+    },
+  });
+  writeStableProtocolBindings(tempRoot);
+  writeJson(path.join(tempRoot, 'deployments', 'stark_11155111.json'), {
+    PhilIdentityGate: '0x4000000000000000000000000000000000000004',
+    PhilIdentityMint: '0x5000000000000000000000000000000000000005',
+    humanityVerifier: '0x6000000000000000000000000000000000000006',
+    factRegistry: '0x7000000000000000000000000000000000000007',
+  });
+  writeJson(path.join(tempRoot, 'deployments', '4337_11155111.json'), {
+    PhilAccountFactory: '0x8000000000000000000000000000000000000008',
+    PhilPaymaster: '0x9000000000000000000000000000000000000009',
+    PhilUnlockInbox: '0xA00000000000000000000000000000000000000A',
+    PhilIdentityMint: '0x5000000000000000000000000000000000000005',
+    PhilIdentityGate: '0x4000000000000000000000000000000000000004',
+    EntryPoint: '0xB00000000000000000000000000000000000000B',
+    paymasterSigner: '0xC00000000000000000000000000000000000000C',
+    starknetCore: '0xD00000000000000000000000000000000000000D',
+  });
+
+  const status = await collectSepoliaStatus(
+    {
+      RPC_URL_SEPOLIA: 'https://rpc.example',
+      PAYMASTER_SIGNER: '0xE00000000000000000000000000000000000000E',
+      L2_UNLOCK_VERIFIER: '0x1234',
+    },
+    tempRoot,
+    { requireLive: false }
+  );
+
+  assert.equal(status.env.l2UnlockSender.source, 'env:L2_UNLOCK_VERIFIER');
+  assert.equal(status.env.l2UnlockSender.value, '0x1234');
 });
 
 test('collectSepoliaStatus classifies legacy Stark manifests as partial and surfaces leftovers', async () => {
@@ -192,6 +238,6 @@ test('collectSepoliaStatus resolves Starknet core from stable protocol bindings 
 
   assert.equal(status.env.entryPoint.source, `stable:${path.join(tempRoot, 'config', 'stable-protocol-bindings', 'sepolia.json')}#contracts.entryPointV07`);
   assert.equal(status.env.starknetCore.source, `stable:${path.join(tempRoot, 'config', 'stable-protocol-bindings', 'sepolia.json')}#contracts.starknetCore`);
-  assert.match(status.warnings.join('\n'), /L2_UNLOCK_VERIFIER is missing or placeholder/);
+  assert.match(status.warnings.join('\n'), /L2_UNLOCK_SENDER is missing or placeholder/);
   assert.doesNotMatch(status.warnings.join('\n'), /STARKNET_CORE is unresolved/);
 });

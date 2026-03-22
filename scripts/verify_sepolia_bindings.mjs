@@ -14,6 +14,8 @@ import {
 } from '../shared/deploy/protocolBindings.mjs';
 
 const DEFAULT_CHAIN_ID = 11155111;
+const L2_UNLOCK_SENDER_LABEL_WITH_ALIAS =
+  'L2_UNLOCK_SENDER (compatibility alias: L2_UNLOCK_VERIFIER)';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
 
@@ -125,7 +127,9 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
   const factRegistryOverride = usableEnvValue(env.FACT_REGISTRY);
   const entryPointOverride = usableEnvValue(env.ENTRY_POINT_V07);
   const starknetCoreOverride = usableEnvValue(env.STARKNET_CORE);
-  const l2UnlockVerifierOverride = usableEnvValue(env.L2_UNLOCK_VERIFIER);
+  const l2UnlockSenderOverride =
+    usableEnvValue(env.L2_UNLOCK_SENDER) ||
+    usableEnvValue(env.L2_UNLOCK_VERIFIER);
 
   const errors = [];
   function resolveAddress(label, value) {
@@ -187,9 +191,9 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
         stableProtocolBindings?.starknetCoreAddress ||
         ''
     ),
-    l2UnlockVerifier: resolveUint256(
-      'L2_UNLOCK_VERIFIER',
-      l2UnlockVerifierOverride || aaDeployment.config.l2UnlockVerifier,
+    l2UnlockSender: resolveUint256(
+      L2_UNLOCK_SENDER_LABEL_WITH_ALIAS,
+      l2UnlockSenderOverride || aaDeployment.config.l2UnlockSender,
       { allowZero: false }
     ),
   };
@@ -210,6 +214,14 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
   }
 
   return config;
+}
+
+async function readUnlockSender(unlockInbox) {
+  try {
+    return BigInt(await unlockInbox.l2UnlockSender());
+  } catch {
+    return BigInt(await unlockInbox.l2VerifierAddress());
+  }
 }
 
 async function assertContractCode(provider, label, address) {
@@ -286,13 +298,14 @@ export async function runVerifySepoliaBindings(
       onchainUnlockInbox,
       [
         'function starknetCore() view returns (address)',
+        'function l2UnlockSender() view returns (uint256)',
         'function l2VerifierAddress() view returns (uint256)',
       ],
       provider
     );
 
     const onchainStarknetCore = ethers.getAddress(await unlockInbox.starknetCore());
-    const onchainL2Verifier = BigInt(await unlockInbox.l2VerifierAddress());
+    const onchainL2UnlockSender = await readUnlockSender(unlockInbox);
 
     assertAddressMatch(
       'HumanityVerifier.factRegistry()',
@@ -337,9 +350,9 @@ export async function runVerifySepoliaBindings(
       config.starknetCoreAddress,
       onchainStarknetCore
     );
-    if (onchainL2Verifier !== config.l2UnlockVerifier) {
+    if (onchainL2UnlockSender !== config.l2UnlockSender) {
       throw new Error(
-        `PhilUnlockInbox.l2VerifierAddress() mismatch. Expected ${config.l2UnlockVerifier}, got ${onchainL2Verifier}.`
+        `PhilUnlockInbox L2 unlock sender mismatch. Expected ${config.l2UnlockSender}, got ${onchainL2UnlockSender}.`
       );
     }
 
@@ -354,7 +367,7 @@ export async function runVerifySepoliaBindings(
     console.log(`  PHIL_PAYMASTER.verifyingSigner(): ${onchainPaymasterSigner}`);
     console.log(`  PHIL_PAYMASTER.philIdentityMint(): ${onchainPaymasterPhilIdentityMint}`);
     console.log(`  PhilUnlockInbox.starknetCore(): ${onchainStarknetCore}`);
-    console.log(`  PhilUnlockInbox.l2VerifierAddress(): ${onchainL2Verifier}`);
+    console.log(`  PhilUnlockInbox.l2UnlockSender(): ${onchainL2UnlockSender}`);
   });
 }
 

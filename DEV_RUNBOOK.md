@@ -277,7 +277,7 @@ Today, the expected live state is:
 
 - Stark-side identity/proof stack: present and current
 - stable EntryPoint/Starknet core bindings: present and reused
-- 4337/account stack: still blocked until a real app-specific `L2_UNLOCK_VERIFIER` is tracked
+- 4337/account stack: still blocked until a real app-specific `L2_UNLOCK_SENDER` is tracked
 
 For strict live verification with a usable Sepolia RPC and signer config:
 
@@ -290,10 +290,11 @@ npm run verify:sepolia
 - `PHIL_ACCOUNT_FACTORY`
 - `PHIL_PAYMASTER`
 - `PAYMASTER_SIGNER` or `PAYMASTER_SIGNER_KEY`
-- `L2_UNLOCK_VERIFIER`
+- `L2_UNLOCK_SENDER`
 
 `STARKNET_CORE` now normally resolves from `config/stable-protocol-bindings/sepolia.json`.
 Override it only if you are deliberately verifying against a different Starknet core contract.
+`L2_UNLOCK_VERIFIER` is still accepted as a compatibility alias, but the active architecture now treats this value as the Starknet L2 unlock sender consumed by `PhilUnlockInbox`.
 
 For read-only inspection, it is fine to override the RPC inline:
 

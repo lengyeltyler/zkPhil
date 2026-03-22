@@ -35,7 +35,7 @@ test('readStableProtocolBindings loads the tracked Sepolia binding manifest shap
       starknetCore: '0x2000000000000000000000000000000000000002',
     },
     notes: {
-      l2UnlockVerifier: 'app-specific',
+      l2UnlockSender: 'app-specific',
     },
   });
 
@@ -47,5 +47,5 @@ test('readStableProtocolBindings loads the tracked Sepolia binding manifest shap
   assert.ok(manifest);
   assert.equal(manifest.entryPointV07Address, '0x1000000000000000000000000000000000000001');
   assert.equal(manifest.starknetCoreAddress, '0x2000000000000000000000000000000000000002');
-  assert.equal(manifest.notes.l2UnlockVerifier, 'app-specific');
+  assert.equal(manifest.notes.l2UnlockSender, 'app-specific');
 });

@@ -149,8 +149,10 @@ function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
   const manifestStarknetCore = aaDeployment.config.starknetCore || '';
   const stableStarknetCore = stableProtocol?.starknetCoreAddress || '';
 
-  const explicitL2UnlockVerifier = usableEnvValue(env.L2_UNLOCK_VERIFIER);
-  const manifestL2UnlockVerifier = aaDeployment.config.l2UnlockVerifier || '';
+  const explicitL2UnlockSender = usableEnvValue(env.L2_UNLOCK_SENDER);
+  const legacyL2UnlockVerifier = usableEnvValue(env.L2_UNLOCK_VERIFIER);
+  const manifestL2UnlockSender = aaDeployment.config.l2UnlockSender || '';
+  const manifestL2UnlockSenderSource = aaDeployment.resolvedFrom?.config?.l2UnlockSender || '';
   const explicitEntryPoint = usableEnvValue(env.ENTRY_POINT_V07);
   const manifestEntryPoint = aaDeployment.dependencies.EntryPoint || '';
   const stableEntryPoint = stableProtocol?.entryPointV07Address || '';
@@ -200,14 +202,17 @@ function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
             ? `stable:${stableProtocol.filePath}#contracts.starknetCore`
             : 'missing'))
     ),
-    l2UnlockVerifier: describeResolvedValueState(
-      'L2_UNLOCK_VERIFIER',
-      explicitL2UnlockVerifier || manifestL2UnlockVerifier,
-      explicitL2UnlockVerifier
-        ? 'env:L2_UNLOCK_VERIFIER'
-        : (manifestL2UnlockVerifier
-          ? `manifest:${aaDeployment.manifestPath}#config.l2UnlockVerifier`
+    l2UnlockSender: describeResolvedValueState(
+      'L2_UNLOCK_SENDER',
+      explicitL2UnlockSender || legacyL2UnlockVerifier || manifestL2UnlockSender,
+      explicitL2UnlockSender
+        ? 'env:L2_UNLOCK_SENDER'
+        : (legacyL2UnlockVerifier
+          ? 'env:L2_UNLOCK_VERIFIER'
+          : (manifestL2UnlockSender
+          ? `manifest:${aaDeployment.manifestPath}#${manifestL2UnlockSenderSource || 'config.l2UnlockSender'}`
           : 'missing')
+      )
     ),
   };
 }
@@ -257,7 +262,7 @@ function determineOverallMutableClassification(identityProof, accountAbstraction
       envStatus.rpcUrl.usable &&
       envStatus.paymasterSignerAddress.usable &&
       envStatus.starknetCore.usable &&
-      envStatus.l2UnlockVerifier.usable
+      envStatus.l2UnlockSender.usable
     ) {
       return 'complete';
     }
@@ -368,8 +373,10 @@ export async function collectSepoliaStatus(
   if (!envStatus.starknetCore.usable) {
     warnings.push('STARKNET_CORE is unresolved. status:sepolia checks env, then deployments/4337_11155111.json, then config/stable-protocol-bindings/sepolia.json.');
   }
-  if (!envStatus.l2UnlockVerifier.usable) {
-    warnings.push('L2_UNLOCK_VERIFIER is missing or placeholder. No app-specific Starknet unlock verifier is currently tracked for Sepolia.');
+  if (!envStatus.l2UnlockSender.usable) {
+    warnings.push(
+      'L2_UNLOCK_SENDER is missing or placeholder. Compatibility alias: L2_UNLOCK_VERIFIER. No app-specific Starknet L2 unlock sender is currently tracked for Sepolia.'
+    );
   }
 
   let stableProtocolVerification = null;
@@ -408,7 +415,7 @@ export async function collectSepoliaStatus(
         entryPointAddress: config.entryPointAddress,
         paymasterSignerAddress: config.paymasterSignerAddress,
         starknetCoreAddress: config.starknetCoreAddress,
-        l2UnlockVerifier: config.l2UnlockVerifier.toString(),
+        l2UnlockSender: config.l2UnlockSender.toString(),
       },
     };
   } catch (error) {
@@ -544,8 +551,8 @@ export function printSepoliaStatus(status) {
   if (status.protocol.exists) {
     printAddress('EntryPointV07', status.protocol.contracts.entryPointV07);
     printAddress('StarknetCore', status.protocol.contracts.starknetCore);
-    if (status.protocol.notes?.l2UnlockVerifier) {
-      console.log(`  Note: ${status.protocol.notes.l2UnlockVerifier}`);
+    if (status.protocol.notes?.l2UnlockSender || status.protocol.notes?.l2UnlockVerifier) {
+      console.log(`  Note: ${status.protocol.notes.l2UnlockSender || status.protocol.notes.l2UnlockVerifier}`);
     }
     if (status.protocol.verification?.ok) {
       console.log('  Verification: verified');
@@ -642,7 +649,7 @@ export function printSepoliaStatus(status) {
   console.log(`  ENTRY_POINT_V07: ${status.env.entryPoint.usable ? `usable via ${status.env.entryPoint.source}` : 'missing-or-placeholder'}`);
   console.log(`  PAYMASTER_SIGNER: ${status.env.paymasterSignerAddress.usable ? `usable via ${status.env.paymasterSignerAddress.source}` : 'missing-or-placeholder'}`);
   console.log(`  STARKNET_CORE: ${status.env.starknetCore.usable ? `usable via ${status.env.starknetCore.source}` : 'missing-or-placeholder'}`);
-  console.log(`  L2_UNLOCK_VERIFIER: ${status.env.l2UnlockVerifier.usable ? `usable via ${status.env.l2UnlockVerifier.source}` : 'missing-or-placeholder'}`);
+  console.log(`  L2_UNLOCK_SENDER: ${status.env.l2UnlockSender.usable ? `usable via ${status.env.l2UnlockSender.source}` : 'missing-or-placeholder'}`);
   console.log(`  Binding config: ${status.config.readable ? 'ready' : `incomplete (${status.config.error})`}`);
 
   console.log('\nVerification');

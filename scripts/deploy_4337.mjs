@@ -20,8 +20,11 @@
  *                              (required for live non-local deployment)
  *   STARKNET_CORE            - Starknet L1 core contract address
  *                              (optional on Sepolia; falls back to config/stable-protocol-bindings/sepolia.json)
- *   L2_UNLOCK_VERIFIER       - Starknet L2 verifier contract address (felt)
- *                              (still required for honest live Sepolia/public-chain deployment)
+ *   L2_UNLOCK_SENDER         - Starknet L2 sender contract address (felt)
+ *                              consumed by PhilUnlockInbox
+ *   L2_UNLOCK_VERIFIER       - Legacy compatibility alias for L2_UNLOCK_SENDER
+ *                              (an app-specific L2 unlock sender is still required for
+ *                               honest live Sepolia/public-chain deployment)
  *   PAYMASTER_DEPOSIT        - ETH to deposit for gas sponsorship (default: "0.5")
  *   REUSE_4337_DEPLOYMENTS   - Reuse deployments/4337_<chainId>.json instead of redeploying
  *   MOCK_UNLOCK_INBOX        - DEV/TEST ONLY local mock inbox mode (chainId 31337 or dry-run only)
@@ -261,7 +264,7 @@ export function readDeploy4337Config(env = process.env) {
     philIdentityMint: String(env.PHIL_IDENTITY_MINT || '').trim(),
     proofGate: String(env.PROOF_GATE || '').trim(),
     starknetCore: String(env.STARKNET_CORE || '').trim(),
-    l2UnlockVerifier: String(env.L2_UNLOCK_VERIFIER || '').trim(),
+    l2UnlockSender: String(env.L2_UNLOCK_SENDER || env.L2_UNLOCK_VERIFIER || '').trim(),
     useMockInbox: isTruthy(env.MOCK_UNLOCK_INBOX || env.SKIP_STARKNET),
     paymasterDeposit: String(env.PAYMASTER_DEPOSIT || '0.001').trim(),
     dryRun,
@@ -405,19 +408,19 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   if (!starknetCore && !useMockInbox) {
     starknetCore = stableProtocolBindings?.starknetCoreAddress || '';
   }
-  let l2UnlockVerifier = looksLikePlaceholder(config.l2UnlockVerifier) ? '' : config.l2UnlockVerifier;
-  if (String(l2UnlockVerifier).trim() === '0') {
-    l2UnlockVerifier = '';
+  let l2UnlockSender = looksLikePlaceholder(config.l2UnlockSender) ? '' : config.l2UnlockSender;
+  if (String(l2UnlockSender).trim() === '0') {
+    l2UnlockSender = '';
   }
   if (useMockInbox && !isLocalChain && !config.dryRun) {
     throw new Error(
       'MOCK_UNLOCK_INBOX is DEV/TEST ONLY and may only be used on chainId 31337. ' +
-      'Live Sepolia/mainnet deployment requires a real Starknet core + L2 unlock verifier.'
+      'Live Sepolia/mainnet deployment requires a real Starknet core + app-specific L2 unlock sender.'
     );
   }
   if (useMockInbox) {
     starknetCore = '';
-    l2UnlockVerifier = '0';
+    l2UnlockSender = '0';
   }
   if (!useMockInbox && !starknetCore) {
     if (!config.dryRun) {
@@ -427,22 +430,22 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
       );
     }
     useMockInbox = true;
-    l2UnlockVerifier = '0';
+    l2UnlockSender = '0';
     console.log(
       'DRY_RUN: STARKNET_CORE is unresolved. Planning with a functional MockStarknetCore.'
     );
   }
-  if (!useMockInbox && !l2UnlockVerifier) {
+  if (!useMockInbox && !l2UnlockSender) {
     if (!config.dryRun) {
       throw new Error(
-        'L2_UNLOCK_VERIFIER must be set to a real Starknet verifier contract felt before live 4337 deployment. ' +
-        'The Sepolia Starknet core is reusable, but the app-specific L2 unlock verifier is still untracked.'
+        'L2_UNLOCK_SENDER must be set to the real Starknet L2 sender felt consumed by PhilUnlockInbox before live 4337 deployment. ' +
+        'Compatibility alias: L2_UNLOCK_VERIFIER. The Sepolia Starknet core is reusable, but the app-specific unlock sender is still untracked.'
       );
     }
     useMockInbox = true;
-    l2UnlockVerifier = '0';
+    l2UnlockSender = '0';
     console.log(
-      'DRY_RUN: L2_UNLOCK_VERIFIER is unresolved. Planning with a functional MockStarknetCore.'
+      'DRY_RUN: L2_UNLOCK_SENDER is unresolved. Planning with a functional MockStarknetCore.'
     );
   }
 
@@ -506,7 +509,7 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   console.log(`PhilIdentityGate:   ${proofGateAddr}`);
   console.log(`Paymaster Signer:  ${paymasterSignerAddr}`);
   console.log(`Starknet Core:     ${starknetCore}${useMockInbox ? ' (mock)' : ''}`);
-  console.log(`L2 Verifier:       ${l2UnlockVerifier}${useMockInbox ? ' (mock)' : ''}`);
+  console.log(`L2 Unlock Sender:  ${l2UnlockSender}${useMockInbox ? ' (mock)' : ''}`);
   console.log(`Paymaster Deposit: ${config.paymasterDeposit} ETH`);
   console.log('='.repeat(60) + '\n');
 
@@ -555,7 +558,7 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
     artifact: PhilUnlockInbox,
     args: [
       starknetCore,
-      l2UnlockVerifier,
+      l2UnlockSender,
     ],
     contractName: 'PhilUnlockInbox',
     dryRun: config.dryRun,
@@ -683,7 +686,7 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
       config: {
         paymasterSigner: paymasterSignerAddr,
         starknetCore,
-        l2UnlockVerifier,
+        l2UnlockSender,
         paymasterDeposit: config.paymasterDeposit,
         useMockInbox,
       },

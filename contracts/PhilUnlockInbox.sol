@@ -20,7 +20,8 @@ contract PhilUnlockInbox {
     }
 
     IStarknetCore public immutable starknetCore;
-    uint256 public immutable l2VerifierAddress;
+    /// @notice Starknet L2 sender contract felt that is allowed to emit unlock tickets.
+    uint256 public immutable l2UnlockSender;
 
     mapping(address => Ticket) private _latestTicket;
     mapping(address => uint64) public lastNonce;
@@ -37,14 +38,14 @@ contract PhilUnlockInbox {
     error InvalidNonce();
 
     /// @param starknetCore_ Starknet L1 core contract
-    /// @param l2VerifierAddress_ Starknet L2 verifier contract address (felt)
-    constructor(address starknetCore_, uint256 l2VerifierAddress_) {
+    /// @param l2UnlockSender_ Starknet L2 sender contract address (felt)
+    constructor(address starknetCore_, uint256 l2UnlockSender_) {
         starknetCore = IStarknetCore(starknetCore_);
-        l2VerifierAddress = l2VerifierAddress_;
+        l2UnlockSender = l2UnlockSender_;
     }
 
     /// @notice Record an unlock ticket via a Starknet L2 message
-    /// @dev Payload layout must match the L2 verifier:
+    /// @dev Payload layout must match the L2 unlock sender:
     ///      [vault, nonce, validAfter, validUntil, scope, constraintsHash]
     function recordTicket(
         address vault,
@@ -69,9 +70,14 @@ contract PhilUnlockInbox {
         _latestTicket[vault] = Ticket(nonce, validAfter, validUntil, scope, constraintsHash);
 
         // Validates the L2->L1 message and consumes it.
-        starknetCore.consumeMessageFromL2(l2VerifierAddress, payload);
+        starknetCore.consumeMessageFromL2(l2UnlockSender, payload);
 
         emit TicketRecorded(vault, nonce, validAfter, validUntil, scope, constraintsHash);
+    }
+
+    /// @notice Legacy getter retained so older tooling can still inspect pre-rename semantics.
+    function l2VerifierAddress() external view returns (uint256) {
+        return l2UnlockSender;
     }
 
     function getTicket(address vault) external view returns (Ticket memory) {

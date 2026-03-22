@@ -8,7 +8,7 @@
     "starknetCore": "0xE2Bb56ee936fd6433DC0F6e7e3b8365C906AA057"
   },
   "notes": {
-    "l2UnlockVerifier": "App-specific Starknet verifier contract. It must be deployed and tracked separately before live Sepolia 4337 deployment can be completed honestly."
+    "l2UnlockSender": "App-specific Starknet L2 sender contract felt consumed by PhilUnlockInbox. It must be deployed and tracked separately before live Sepolia 4337 deployment can be completed honestly."
   },
   "references": [
     "https://docs.starknet.io/resources/chain-info",

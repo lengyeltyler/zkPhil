@@ -70,7 +70,7 @@ test('writeMutableStackManifest emits a complete structured 4337 manifest', () =
     config: {
       paymasterSigner: '0x8000000000000000000000000000000000000008',
       starknetCore: '0x9000000000000000000000000000000000000009',
-      l2UnlockVerifier: '0x1234',
+      l2UnlockSender: '0x1234',
       paymasterDeposit: '0.1',
       useMockInbox: false,
     },
@@ -88,8 +88,44 @@ test('writeMutableStackManifest emits a complete structured 4337 manifest', () =
   assert.equal(manifest.sourceScript, 'scripts/deploy_4337.mjs');
   assert.equal(manifest.config.paymasterSigner, '0x8000000000000000000000000000000000000008');
   assert.equal(manifest.config.starknetCore, '0x9000000000000000000000000000000000000009');
-  assert.equal(manifest.config.l2UnlockVerifier, '0x1234');
+  assert.equal(manifest.config.l2UnlockSender, '0x1234');
   assert.deepEqual(manifest.blockers, []);
+});
+
+test('readMutableStackManifest normalizes legacy l2UnlockVerifier aliases onto l2UnlockSender', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-mutable-stack-'));
+
+  writeJson(path.join(tempRoot, 'deployments', '4337_11155111.json'), {
+    schema: 'zkphil-mutable-stack-v1',
+    stack: 'account-abstraction',
+    chainId: 11155111,
+    components: {
+      PhilAccountFactory: '0x1000000000000000000000000000000000000001',
+      PhilPaymaster: '0x2000000000000000000000000000000000000002',
+      PhilUnlockInbox: '0x3000000000000000000000000000000000000003',
+    },
+    dependencies: {
+      PhilIdentityMint: '0x5000000000000000000000000000000000000005',
+      PhilIdentityGate: '0x6000000000000000000000000000000000000006',
+      EntryPoint: '0x7000000000000000000000000000000000000007',
+    },
+    config: {
+      paymasterSigner: '0x8000000000000000000000000000000000000008',
+      starknetCore: '0x9000000000000000000000000000000000000009',
+      l2UnlockVerifier: '0x1234',
+      useMockInbox: false,
+    },
+  });
+
+  const manifest = readMutableStackManifest({
+    stack: MUTABLE_STACK_ACCOUNT_ABSTRACTION,
+    chainId: 11155111,
+    rootDir: tempRoot,
+  });
+
+  assert.equal(manifest.classification, 'complete');
+  assert.equal(manifest.config.l2UnlockSender, '0x1234');
+  assert.equal(manifest.resolvedFrom.config.l2UnlockSender, 'config.l2UnlockVerifier');
 });
 
 test('readMutableStackManifest marks non-local mock inbox 4337 manifests as placeholder-configured', () => {
@@ -113,7 +149,7 @@ test('readMutableStackManifest marks non-local mock inbox 4337 manifests as plac
     config: {
       paymasterSigner: '0x8000000000000000000000000000000000000008',
       starknetCore: '0x4000000000000000000000000000000000000004',
-      l2UnlockVerifier: '0',
+      l2UnlockSender: '0',
       useMockInbox: true,
     },
   });
@@ -125,7 +161,7 @@ test('readMutableStackManifest marks non-local mock inbox 4337 manifests as plac
   });
 
   assert.equal(manifest.classification, 'placeholder-configured');
-  assert.deepEqual(manifest.placeholderConfig, ['l2UnlockVerifier', 'useMockInbox']);
+  assert.deepEqual(manifest.placeholderConfig, ['l2UnlockSender', 'useMockInbox']);
   assert.match(
     manifest.blockers.join('\n'),
     /useMockInbox=true is DEV\/TEST ONLY/

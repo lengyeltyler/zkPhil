@@ -78,11 +78,23 @@ const STACK_CONFIG = {
     configKeys: [
       'paymasterSigner',
       'starknetCore',
-      'l2UnlockVerifier',
+      'l2UnlockSender',
       'paymasterDeposit',
       'useMockInbox',
     ],
-    placeholderSensitiveConfigKeys: ['paymasterSigner', 'starknetCore', 'l2UnlockVerifier'],
+    configCandidates: {
+      paymasterSigner: ['config.paymasterSigner', 'paymasterSigner'],
+      starknetCore: ['config.starknetCore', 'starknetCore'],
+      l2UnlockSender: [
+        'config.l2UnlockSender',
+        'l2UnlockSender',
+        'config.l2UnlockVerifier',
+        'l2UnlockVerifier',
+      ],
+      paymasterDeposit: ['config.paymasterDeposit', 'paymasterDeposit'],
+      useMockInbox: ['config.useMockInbox', 'useMockInbox'],
+    },
+    placeholderSensitiveConfigKeys: ['paymasterSigner', 'starknetCore', 'l2UnlockSender'],
     extraCompatibilityFields: ['chainId'],
   },
 };
@@ -203,7 +215,7 @@ function coerceStructuredConfig(rawManifest, config) {
   for (const key of config.configKeys) {
     const resolved = pickResolvedValue(
       rawManifest,
-      [`config.${key}`, key],
+      config.configCandidates?.[key] || [`config.${key}`, key],
       normalizeConfigValue
     );
     configValues[key] = resolved.value;
@@ -278,8 +290,8 @@ function analyzeStructuredManifest(rawManifest, stack, manifestPath) {
 
   const manifestChainId = Number(rawManifest.chainId || 0) || null;
   if (stack === MUTABLE_STACK_ACCOUNT_ABSTRACTION) {
-    if (!placeholderConfig.includes('l2UnlockVerifier') && looksLikeZeroUint(normalized.config.l2UnlockVerifier)) {
-      placeholderConfig.push('l2UnlockVerifier');
+    if (!placeholderConfig.includes('l2UnlockSender') && looksLikeZeroUint(normalized.config.l2UnlockSender)) {
+      placeholderConfig.push('l2UnlockSender');
     }
     if (
       manifestChainId !== LOCAL_CHAIN_ID &&
@@ -398,7 +410,8 @@ function buildCompatibilityFields(stack, components, dependencies, config) {
     MockStarknetCore: components.MockStarknetCore || '',
     paymasterSigner: config.paymasterSigner || '',
     starknetCore: config.starknetCore || '',
-    l2UnlockVerifier: config.l2UnlockVerifier || '',
+    l2UnlockSender: config.l2UnlockSender || '',
+    l2UnlockVerifier: config.l2UnlockSender || '',
     paymasterDeposit: config.paymasterDeposit || '',
     useMockInbox: Boolean(config.useMockInbox),
   };

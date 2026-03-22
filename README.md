@@ -30,7 +30,7 @@ The active verifier bridge is still fact-registry-based.
 - Those mutable manifests now use `zkphil-mutable-stack-v1` when written by the current deploy scripts and split their contents into `components`, `dependencies`, `config`, and `status`.
 - `status:sepolia` also understands older flat manifests and will call them out as `legacy-flat-json`, `partial`, or alias-backed instead of pretending they are current.
 - The live current Sepolia identity/proof stack is now tracked in `deployments/stark_11155111.json`.
-- The Sepolia 4337/account layer is still intentionally absent from `deployments/4337_11155111.json` until a real app-specific `L2_UNLOCK_VERIFIER` is tracked.
+- The Sepolia 4337/account layer is still intentionally absent from `deployments/4337_11155111.json` until a real app-specific `L2_UNLOCK_SENDER` is tracked.
 - Local helper runs reuse healthy local manifests when possible and only re-bootstrap the art backend when the local chain is fresh or the manifest is unhealthy.
 
 ## Active identity architecture
@@ -168,7 +168,7 @@ Current Sepolia truth:
 
 - `deployments/stark_11155111.json` is current and complete for the humanity-ready identity/proof stack
 - `config/stable-protocol-bindings/sepolia.json` now tracks the reused Sepolia `EntryPoint v0.7` and `StarknetCore`
-- `deployments/4337_11155111.json` is still missing because the app-specific `L2_UNLOCK_VERIFIER` is not yet tracked
+- `deployments/4337_11155111.json` is still missing because the app-specific `L2_UNLOCK_SENDER` is not yet tracked
 - `verify:sepolia` therefore still fails closed honestly
 
 The mutable Sepolia states are classified as:
@@ -208,7 +208,8 @@ Optional:
 - `ENTRY_POINT_V07`
 - `PAYMASTER_SIGNER`
 - `STARKNET_CORE`
-- `L2_UNLOCK_VERIFIER`
+- `L2_UNLOCK_SENDER`
+- `L2_UNLOCK_VERIFIER` as a legacy compatibility alias only
 - `LOCAL_PROVER_HOST`
 - `LOCAL_PROVER_PORT`
 - `NODE_BIN`
@@ -219,7 +220,7 @@ Sepolia mutable-manifest fallbacks:
 - `PHIL_ACCOUNT_FACTORY`
 - `PHIL_PAYMASTER`
 
-If the mutable Sepolia manifests are complete, `status:sepolia` and `verify:sepolia` can resolve `PAYMASTER_SIGNER` and `L2_UNLOCK_VERIFIER` from `deployments/4337_11155111.json`, while `ENTRY_POINT_V07` and `STARKNET_CORE` can already fall back to `config/stable-protocol-bindings/sepolia.json`.
+If the mutable Sepolia manifests are complete, `status:sepolia` and `verify:sepolia` can resolve `PAYMASTER_SIGNER` and `L2_UNLOCK_SENDER` from `deployments/4337_11155111.json`, while `ENTRY_POINT_V07` and `STARKNET_CORE` can already fall back to `config/stable-protocol-bindings/sepolia.json`. `L2_UNLOCK_VERIFIER` remains accepted as a compatibility alias, but it is no longer the canonical name.
 
 Generic bundle-path and old proof-context compatibility aliases from earlier refactors have been removed from the active tracked workflow.
 
