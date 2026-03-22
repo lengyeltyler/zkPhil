@@ -23,6 +23,7 @@ cache/
 typechain/
 typechain-types/
 cairo/target/
+starknet/target/
 
 # Misc
 .DS_Store

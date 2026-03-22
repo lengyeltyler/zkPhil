@@ -24,13 +24,15 @@ The active verifier bridge is still fact-registry-based.
 
 - Stable Sepolia trait/data infrastructure now lives in [`config/stable-art-backends/sepolia.json`](./config/stable-art-backends/sepolia.json).
 - Stable Sepolia protocol bindings now live in [`config/stable-protocol-bindings/sepolia.json`](./config/stable-protocol-bindings/sepolia.json).
+- App-specific Starknet unlock-sender bindings now live under [`config/starknet-app-bindings/`](./config/starknet-app-bindings/).
 - That manifest is the intended reused base for `PhilSVGStorage`, `PhilLayerRegistry`, and `PhilNFT` on Sepolia.
 - The stable protocol manifest is the intended reused base for `EntryPoint v0.7` and `StarknetCore` on Sepolia.
-- Mutable identity/proof/account infrastructure still writes per-chain deployment manifests under `deployments/`, for example `stark_<chainId>.json` and `4337_<chainId>.json`.
+- Mutable L1 identity/proof/account infrastructure still writes per-chain deployment manifests under `deployments/`, for example `stark_<chainId>.json` and `4337_<chainId>.json`.
 - Those mutable manifests now use `zkphil-mutable-stack-v1` when written by the current deploy scripts and split their contents into `components`, `dependencies`, `config`, and `status`.
 - `status:sepolia` also understands older flat manifests and will call them out as `legacy-flat-json`, `partial`, or alias-backed instead of pretending they are current.
 - The live current Sepolia identity/proof stack is now tracked in `deployments/stark_11155111.json`.
-- The Sepolia 4337/account layer is still intentionally absent from `deployments/4337_11155111.json` until a real app-specific `L2_UNLOCK_SENDER` is tracked.
+- The missing public-chain app binding is now explicit: `config/starknet-app-bindings/sepolia.json` must track a real Starknet `PhilUnlockSender` before Sepolia 4337 deployment can complete honestly.
+- `deployments/4337_11155111.json` remains intentionally absent until that Starknet app binding exists and the L1 account/paymaster stack is actually deployed.
 - Local helper runs reuse healthy local manifests when possible and only re-bootstrap the art backend when the local chain is fresh or the manifest is unhealthy.
 
 ## Active identity architecture
@@ -105,6 +107,24 @@ Run the direct mock-humanity CLI flow after the chain, backend, and prover are u
 npm run local:mock-flow
 ```
 
+Build the Starknet unlock sender package:
+
+```bash
+npm run starknet:build-unlock-sender
+```
+
+Attempt the real Starknet Sepolia unlock-sender deployment once Starknet RPC/account credentials exist:
+
+```bash
+npm run starknet:deploy-unlock-sender
+```
+
+After a real L1 `PhilUnlockInbox` exists, bind the Starknet sender to that inbox:
+
+```bash
+npm run starknet:set-unlock-recipient
+```
+
 ## Local dev quick start
 
 One-command smoke path:
@@ -162,13 +182,14 @@ For the fully explicit manual workflow, use [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 
 ## Sepolia status
 
-`npm run status:sepolia` reports the stable reused art/data addresses, the mutable Stark and 4337 manifests, legacy alias usage, placeholder config, and whether live verification ran or was skipped.
+`npm run status:sepolia` reports the stable reused art/data addresses, the stable reusable protocol bindings, the Starknet app unlock-sender binding, the mutable Stark and 4337 manifests, legacy alias usage, placeholder config, and whether live verification ran or was skipped.
 
 Current Sepolia truth:
 
 - `deployments/stark_11155111.json` is current and complete for the humanity-ready identity/proof stack
 - `config/stable-protocol-bindings/sepolia.json` now tracks the reused Sepolia `EntryPoint v0.7` and `StarknetCore`
-- `deployments/4337_11155111.json` is still missing because the app-specific `L2_UNLOCK_SENDER` is not yet tracked
+- `config/starknet-app-bindings/sepolia.json` is still intentionally missing because no real Starknet `PhilUnlockSender` has been deployed and tracked from this repo yet
+- `deployments/4337_11155111.json` is therefore still missing because the L1 account/paymaster stack has not been deployed against a tracked Starknet unlock sender
 - `verify:sepolia` therefore still fails closed honestly
 
 The mutable Sepolia states are classified as:
@@ -185,6 +206,7 @@ The mutable Sepolia states are classified as:
 The current expected mutable Sepolia manifest paths are:
 
 - `deployments/stark_11155111.json`
+- `config/starknet-app-bindings/sepolia.json`
 - `deployments/4337_11155111.json`
 
 `npm run verify:sepolia` is the stricter compatibility alias for live verification when a usable Sepolia RPC and signer config are available.
@@ -208,8 +230,13 @@ Optional:
 - `ENTRY_POINT_V07`
 - `PAYMASTER_SIGNER`
 - `STARKNET_CORE`
+- `STARKNET_RPC_URL`
+- `STARKNET_RPC_URL_SEPOLIA`
+- `STARKNET_ACCOUNT_ADDRESS`
+- `STARKNET_PRIVATE_KEY`
 - `L2_UNLOCK_SENDER`
 - `L2_UNLOCK_VERIFIER` as a legacy compatibility alias only
+- `L1_UNLOCK_RECIPIENT`
 - `LOCAL_PROVER_HOST`
 - `LOCAL_PROVER_PORT`
 - `NODE_BIN`
@@ -220,7 +247,13 @@ Sepolia mutable-manifest fallbacks:
 - `PHIL_ACCOUNT_FACTORY`
 - `PHIL_PAYMASTER`
 
-If the mutable Sepolia manifests are complete, `status:sepolia` and `verify:sepolia` can resolve `PAYMASTER_SIGNER` and `L2_UNLOCK_SENDER` from `deployments/4337_11155111.json`, while `ENTRY_POINT_V07` and `STARKNET_CORE` can already fall back to `config/stable-protocol-bindings/sepolia.json`. `L2_UNLOCK_VERIFIER` remains accepted as a compatibility alias, but it is no longer the canonical name.
+Sepolia binding resolution now follows three layers:
+
+- reused protocol values: `ENTRY_POINT_V07` and `STARKNET_CORE` can fall back to `config/stable-protocol-bindings/sepolia.json`
+- app-specific Starknet unlock sender: `L2_UNLOCK_SENDER` can fall back to `config/starknet-app-bindings/sepolia.json`
+- mutable L1 account/paymaster deployment: `PAYMASTER_SIGNER`, `PHIL_ACCOUNT_FACTORY`, `PHIL_PAYMASTER`, and the final wired `L2_UNLOCK_SENDER` can resolve from `deployments/4337_11155111.json` once that stack is live
+
+`L2_UNLOCK_VERIFIER` remains accepted as a compatibility alias, but it is no longer the canonical name.
 
 Generic bundle-path and old proof-context compatibility aliases from earlier refactors have been removed from the active tracked workflow.
 
@@ -230,8 +263,9 @@ See [`.env.example`](./.env.example) for the full template.
 
 ```bash
 scarb --manifest-path cairo/Scarb.toml test
+scarb --manifest-path starknet/Scarb.toml build
 cd server-ts && npx vitest --run src/lib/eligibility.test.ts src/routes/status.test.ts src/routes/requestMint.test.ts src/routes/requestMint.production.test.ts src/routes/signPaymaster.test.ts
-node --test test/eligibility-proof.contract.test.mjs test/mock-humanity.contract.test.mjs test/error-cases.contract.test.mjs test/verify-sepolia-bindings.test.mjs
+node --test test/starknet-app-bindings.test.mjs test/eligibility-proof.contract.test.mjs test/mock-humanity.contract.test.mjs test/error-cases.contract.test.mjs test/verify-sepolia-bindings.test.mjs
 node --test test/sepolia-status.test.mjs
 ```
 
@@ -241,7 +275,9 @@ node --test test/sepolia-status.test.mjs
 - Cleanup report: [`CLEANUP_REPORT.md`](./CLEANUP_REPORT.md)
 - DEV runbook: [`DEV_RUNBOOK.md`](./DEV_RUNBOOK.md)
 - Project status: [`PROJECT_STATUS_REPORT.md`](./PROJECT_STATUS_REPORT.md)
+- Final project status: [`FINAL_PROJECT_STATUS.md`](./FINAL_PROJECT_STATUS.md)
 - Repo modernization report: [`REPO_MODERNIZATION_REPORT.md`](./REPO_MODERNIZATION_REPORT.md)
 - Sepolia 4337 modernization report: [`SEPOLIA_4337_MODERNIZATION_REPORT.md`](./SEPOLIA_4337_MODERNIZATION_REPORT.md)
+- Unlock sender implementation report: [`UNLOCK_SENDER_IMPLEMENTATION_REPORT.md`](./UNLOCK_SENDER_IMPLEMENTATION_REPORT.md)
 - Migration notes: [`MIGRATION_NOTES.md`](./MIGRATION_NOTES.md)
 - Humanity-ready summary: [`HUMANITY_READY_SUMMARY.md`](./HUMANITY_READY_SUMMARY.md)

@@ -1,0 +1,15 @@
+[package]
+name = "phil_unlock_sender"
+version = "0.1.0"
+edition = "2024_07"
+
+[dependencies]
+starknet = "2.15.0"
+
+[cairo]
+sierra-replace-ids = true
+enable-gas = true
+
+[[target.starknet-contract]]
+sierra = true
+casm = true

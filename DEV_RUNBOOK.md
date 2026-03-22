@@ -267,6 +267,7 @@ This reports:
 
 - stable reused art/data from `config/stable-art-backends/sepolia.json`
 - stable reused protocol bindings from `config/stable-protocol-bindings/sepolia.json`
+- Starknet app unlock-sender bindings from `config/starknet-app-bindings/sepolia.json`
 - mutable identity/proof state from `deployments/stark_11155111.json`
 - mutable 4337/account state from `deployments/4337_11155111.json`
 - whether a mutable manifest is `complete`, `partial`, `missing`, or `placeholder-configured`
@@ -277,7 +278,8 @@ Today, the expected live state is:
 
 - Stark-side identity/proof stack: present and current
 - stable EntryPoint/Starknet core bindings: present and reused
-- 4337/account stack: still blocked until a real app-specific `L2_UNLOCK_SENDER` is tracked
+- Starknet unlock-sender app binding: still missing until a real `PhilUnlockSender` is deployed on Starknet Sepolia and tracked in `config/starknet-app-bindings/sepolia.json`
+- 4337/account stack: still blocked until that Starknet sender exists and is then used for the L1 `PhilUnlockInbox` deployment
 
 For strict live verification with a usable Sepolia RPC and signer config:
 
@@ -291,10 +293,25 @@ npm run verify:sepolia
 - `PHIL_PAYMASTER`
 - `PAYMASTER_SIGNER` or `PAYMASTER_SIGNER_KEY`
 - `L2_UNLOCK_SENDER`
+- `config/starknet-app-bindings/sepolia.json`
+- `STARKNET_RPC_URL` or `STARKNET_RPC_URL_SEPOLIA`
 
 `STARKNET_CORE` now normally resolves from `config/stable-protocol-bindings/sepolia.json`.
 Override it only if you are deliberately verifying against a different Starknet core contract.
 `L2_UNLOCK_VERIFIER` is still accepted as a compatibility alias, but the active architecture now treats this value as the Starknet L2 unlock sender consumed by `PhilUnlockInbox`.
+
+To build or deploy the Starknet sender path directly:
+
+```bash
+npm run starknet:build-unlock-sender
+npm run starknet:deploy-unlock-sender
+```
+
+After a real Sepolia `PhilUnlockInbox` exists in `deployments/4337_11155111.json`, bind the Starknet sender to it with:
+
+```bash
+npm run starknet:set-unlock-recipient
+```
 
 For read-only inspection, it is fine to override the RPC inline:
 

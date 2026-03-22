@@ -55,6 +55,12 @@ import {
   LOCAL_ENTRY_POINT_V07,
   readStableProtocolBindings,
 } from '../shared/deploy/protocolBindings.mjs';
+import {
+  readStarknetAppBindings,
+  STARKNET_UNLOCK_HASH_ENCODING,
+  STARKNET_UNLOCK_PAYLOAD_VERSION,
+} from '../shared/deploy/starknetAppBindings.mjs';
+import { normalizeStarknetFelt } from '../shared/deploy/starknetFelt.mjs';
 import { logTx, waitForReceiptWithTimeout } from './sepolia/txutil.mjs';
 import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
 
@@ -309,6 +315,10 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
     chainId,
     rootDir: ROOT_DIR,
   });
+  const starknetAppBindings = readStarknetAppBindings({
+    l1ChainId: chainId,
+    rootDir: ROOT_DIR,
+  });
   if (!config.dryRun && !isLocalChain && rawWallet.privateKey.toLowerCase() === DEFAULT_DRY_RUN_PRIVATE_KEY) {
     throw new Error('Live non-local deployment refuses the default Hardhat private key. Set PRIVATE_KEY explicitly.');
   }
@@ -408,9 +418,14 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   if (!starknetCore && !useMockInbox) {
     starknetCore = stableProtocolBindings?.starknetCoreAddress || '';
   }
-  let l2UnlockSender = looksLikePlaceholder(config.l2UnlockSender) ? '' : config.l2UnlockSender;
-  if (String(l2UnlockSender).trim() === '0') {
-    l2UnlockSender = '';
+  let l2UnlockSenderSource = '';
+  let l2UnlockSender = '';
+  if (!looksLikePlaceholder(config.l2UnlockSender) && String(config.l2UnlockSender).trim() !== '0') {
+    l2UnlockSender = normalizeStarknetFelt(config.l2UnlockSender, { allowZero: false });
+    l2UnlockSenderSource = process.env.L2_UNLOCK_SENDER ? 'env:L2_UNLOCK_SENDER' : 'env:L2_UNLOCK_VERIFIER';
+  } else if (starknetAppBindings.contracts.unlockSender) {
+    l2UnlockSender = starknetAppBindings.contracts.unlockSender;
+    l2UnlockSenderSource = `manifest:${starknetAppBindings.manifestPath}#contracts.unlockSender`;
   }
   if (useMockInbox && !isLocalChain && !config.dryRun) {
     throw new Error(
@@ -439,7 +454,8 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
     if (!config.dryRun) {
       throw new Error(
         'L2_UNLOCK_SENDER must be set to the real Starknet L2 sender felt consumed by PhilUnlockInbox before live 4337 deployment. ' +
-        'Compatibility alias: L2_UNLOCK_VERIFIER. The Sepolia Starknet core is reusable, but the app-specific unlock sender is still untracked.'
+        `Compatibility alias: L2_UNLOCK_VERIFIER. The Sepolia Starknet core is reusable, but the app-specific unlock sender is still untracked. ` +
+        `Expected source order: env -> ${starknetAppBindings.manifestPath || 'config/starknet-app-bindings/sepolia.json'}.`
       );
     }
     useMockInbox = true;
@@ -509,7 +525,13 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
   console.log(`PhilIdentityGate:   ${proofGateAddr}`);
   console.log(`Paymaster Signer:  ${paymasterSignerAddr}`);
   console.log(`Starknet Core:     ${starknetCore}${useMockInbox ? ' (mock)' : ''}`);
-  console.log(`L2 Unlock Sender:  ${l2UnlockSender}${useMockInbox ? ' (mock)' : ''}`);
+  console.log(
+    `L2 Unlock Sender:  ${l2UnlockSender || '(missing)'}${useMockInbox ? ' (mock)' : ''}${l2UnlockSenderSource ? ` [via ${l2UnlockSenderSource}]` : ''}`
+  );
+  if (starknetAppBindings.exists) {
+    console.log(`Starknet Binding:  ${starknetAppBindings.manifestPath}`);
+    console.log(`L1 Recipient:      ${starknetAppBindings.bindings.l1Recipient || '(unset)'}`);
+  }
   console.log(`Paymaster Deposit: ${config.paymasterDeposit} ETH`);
   console.log('='.repeat(60) + '\n');
 
@@ -687,11 +709,19 @@ export async function runDeploy4337(config = readDeploy4337Config(process.env)) 
         paymasterSigner: paymasterSignerAddr,
         starknetCore,
         l2UnlockSender,
+        starknetAppBindingManifest: starknetAppBindings.exists ? starknetAppBindings.manifestPath : '',
+        unlockPayloadVersion: STARKNET_UNLOCK_PAYLOAD_VERSION,
+        constraintsHashEncoding: STARKNET_UNLOCK_HASH_ENCODING,
         paymasterDeposit: config.paymasterDeposit,
         useMockInbox,
       },
     });
     console.log(`\nDeployments saved to: ${manifestWrite.manifestPath}`);
+    if (!useMockInbox && starknetAppBindings.exists && starknetAppBindings.bindings.l1Recipient !== deployments.PhilUnlockInbox) {
+      console.log(
+        `Next step: set the Starknet unlock sender recipient to ${deployments.PhilUnlockInbox} with \`npm run starknet:set-unlock-recipient\`.`
+      );
+    }
   } else {
     console.log(`DRY_RUN: skipping 4337 deployment manifest write (${outPath}).`);
   }

@@ -27,6 +27,26 @@ function writeStableProtocolBindings(tempRoot) {
   });
 }
 
+function writeStarknetAppBindings(tempRoot, overrides = {}) {
+  writeJson(path.join(tempRoot, 'config', 'starknet-app-bindings', 'sepolia.json'), {
+    schema: 'zkphil-starknet-app-bindings-v1',
+    deploymentType: 'starknet-app-binding',
+    starknetNetwork: 'sepolia',
+    l1ChainId: 11155111,
+    sourceScript: 'scripts/starknet/deploy_unlock_sender.mjs',
+    contracts: {
+      unlockSender: '0x1234',
+      owner: '0x5678',
+    },
+    bindings: {
+      l1Recipient: '0xA00000000000000000000000000000000000000A',
+      payloadVersion: 'zkphil-unlock-ticket-v1',
+      constraintsHashEncoding: 'bytes32-hi-lo-128',
+    },
+    ...overrides,
+  });
+}
+
 test('collectSepoliaStatus reports reused and mutable manifests without requiring live RPC', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'zkphil-sepolia-status-'));
 
@@ -42,6 +62,7 @@ test('collectSepoliaStatus reports reused and mutable manifests without requirin
     },
   });
   writeStableProtocolBindings(tempRoot);
+  writeStarknetAppBindings(tempRoot);
   writeJson(path.join(tempRoot, 'deployments', 'stark_11155111.json'), {
     PhilIdentityGate: '0x4000000000000000000000000000000000000004',
     PhilIdentityMint: '0x5000000000000000000000000000000000000005',
@@ -65,7 +86,6 @@ test('collectSepoliaStatus reports reused and mutable manifests without requirin
       RPC_URL_SEPOLIA: 'https://rpc.example',
       PAYMASTER_SIGNER: '0xE00000000000000000000000000000000000000E',
       STARKNET_CORE: '0xF00000000000000000000000000000000000000F',
-      L2_UNLOCK_SENDER: '0x1234',
     },
     tempRoot,
     { requireLive: false }
@@ -73,17 +93,23 @@ test('collectSepoliaStatus reports reused and mutable manifests without requirin
 
   assert.equal(status.reused.exists, true);
   assert.equal(status.protocol.exists, true);
+  assert.equal(status.starknetApp.exists, true);
   assert.equal(status.mutable.identityProof.exists, true);
   assert.equal(status.mutable.accountAbstraction.exists, true);
+  assert.equal(status.starknetApp.classification, 'complete');
   assert.equal(status.mutable.identityProof.classification, 'complete');
   assert.equal(status.mutable.accountAbstraction.classification, 'complete');
   assert.equal(status.mutable.overallClassification, 'placeholder-configured');
-  assert.equal(status.config.readable, true);
+  assert.equal(status.config.readable, false);
   assert.equal(status.errors.length, 0);
   assert.equal(status.liveVerification.skipped, true);
   assert.equal(status.protocol.contracts.entryPointV07, '0xB00000000000000000000000000000000000000B');
   assert.equal(status.env.paymasterSignerAddress.source, 'env:PAYMASTER_SIGNER');
   assert.equal(status.env.starknetCore.source, 'env:STARKNET_CORE');
+  assert.equal(
+    status.env.l2UnlockSender.source,
+    `manifest:${path.join(tempRoot, 'deployments', '4337_11155111.json')}#config.l2UnlockSender`
+  );
   assert.match(
     status.warnings.join('\n'),
     /live Sepolia verification will be skipped/i
@@ -114,6 +140,7 @@ test('collectSepoliaStatus accepts the legacy L2 unlock verifier env alias as co
     },
   });
   writeStableProtocolBindings(tempRoot);
+  writeStarknetAppBindings(tempRoot);
   writeJson(path.join(tempRoot, 'deployments', 'stark_11155111.json'), {
     PhilIdentityGate: '0x4000000000000000000000000000000000000004',
     PhilIdentityMint: '0x5000000000000000000000000000000000000005',
@@ -239,5 +266,6 @@ test('collectSepoliaStatus resolves Starknet core from stable protocol bindings 
   assert.equal(status.env.entryPoint.source, `stable:${path.join(tempRoot, 'config', 'stable-protocol-bindings', 'sepolia.json')}#contracts.entryPointV07`);
   assert.equal(status.env.starknetCore.source, `stable:${path.join(tempRoot, 'config', 'stable-protocol-bindings', 'sepolia.json')}#contracts.starknetCore`);
   assert.match(status.warnings.join('\n'), /L2_UNLOCK_SENDER is missing or placeholder/);
+  assert.match(status.warnings.join('\n'), /Starknet app binding manifest is missing/);
   assert.doesNotMatch(status.warnings.join('\n'), /STARKNET_CORE is unresolved/);
 });

@@ -19,15 +19,22 @@ Stable, reused infrastructure:
 - Sepolia protocol bindings live in [`config/stable-protocol-bindings/sepolia.json`](../config/stable-protocol-bindings/sepolia.json).
 - Those stable protocol bindings are the intended reuse base for `EntryPoint v0.7` and `StarknetCore`.
 
+Tracked app-specific Starknet bindings:
+
+- the Starknet unlock sender is tracked separately in [`config/starknet-app-bindings/`](../config/starknet-app-bindings/)
+- that manifest is intentionally not part of the stable protocol layer because `PhilUnlockSender` is app-specific mutable infrastructure
+- the Starknet app binding records the Starknet sender felt, the bound L1 `PhilUnlockInbox`, and the current unlock payload format
+
 Mutable, redeployable infrastructure:
 
 - provider-aware identity core manifests live under `deployments/stark_<chainId>.json`
+- Starknet app binding manifests live under `config/starknet-app-bindings/<network>.json`
 - 4337/account manifests live under `deployments/4337_<chainId>.json`
 - local art bootstrap manifests live under `deployments/art_<chainId>.json`
 - current deploy scripts write Sepolia/local mutable manifests as `zkphil-mutable-stack-v1`
 - those manifests separate `components`, `dependencies`, `config`, and computed `status`
 - status tooling still reads older flat manifests, but marks them as `legacy-flat-json` and surfaces alias resolution instead of treating them as fully current
-- on Sepolia today, the Stark-side mutable stack is deployed and tracked, the reusable protocol bindings are tracked, and the 4337/account layer remains intentionally undeployed until the app-specific Starknet L2 unlock sender is real
+- on Sepolia today, the Stark-side mutable stack is deployed and tracked, the reusable protocol bindings are tracked, but the Starknet app binding and the L1 4337/account layer are still intentionally incomplete until a real Starknet `PhilUnlockSender` is deployed and tracked
 
 Deployment modes:
 
@@ -66,7 +73,9 @@ This does not call any external proof-of-human service.
 - [`contracts/proofs/FactRegistryHumanityVerifier.sol`](../contracts/proofs/FactRegistryHumanityVerifier.sol)
 - [`contracts/proofs/MockHumanityVerifier.sol`](../contracts/proofs/MockHumanityVerifier.sol)
 - [`contracts/proofs/DevProofVerifier.sol`](../contracts/proofs/DevProofVerifier.sol)
+- [`contracts/PhilUnlockInbox.sol`](../contracts/PhilUnlockInbox.sol)
 - [`cairo/src/credential.cairo`](../cairo/src/credential.cairo)
+- [`starknet/src/lib.cairo`](../starknet/src/lib.cairo)
 - [`shared/proof/localStarkProver.mjs`](../shared/proof/localStarkProver.mjs)
 - [`shared/proof/credentialBundle.mjs`](../shared/proof/credentialBundle.mjs)
 - [`shared/proof/mockHumanityBundle.mjs`](../shared/proof/mockHumanityBundle.mjs)
@@ -133,6 +142,19 @@ The output shape stays stable so the fact-registry bridge does not change.
 7. `PhilIdentityGate` consumes the identity nullifier.
 8. `PhilIdentityMint` mints to the requested smart account.
 
+## Starknet unlock sender path
+
+- `PhilUnlockInbox` consumes Starknet L2->L1 messages through the reused `StarknetCore` contract on L1.
+- The app-specific Starknet sender is `PhilUnlockSender`, now implemented in [`starknet/src/lib.cairo`](../starknet/src/lib.cairo).
+- `PhilUnlockSender` is a minimal Starknet contract that:
+  - stores an owner Starknet account
+  - stores the bound L1 `PhilUnlockInbox` recipient
+  - emits unlock ticket payloads toward L1
+- The current unlock payload format is `zkphil-unlock-ticket-v1`:
+  - `[vault, nonce, validAfter, validUntil, scope, constraintsHashHi128, constraintsHashLo128]`
+- `PhilUnlockInbox` reconstructs the original `bytes32 constraintsHash` from those two Starknet-safe 128-bit words before storing the latest ticket for a vault.
+- This Starknet sender path is only needed for the 4337/account unlock flow; the Phil identity proof/nullifier flow remains L1 + Cairo/S-two + fact-registry based.
+
 ## Trust model
 
 Removed:
@@ -156,6 +178,8 @@ Dev helper behavior:
 - `npm run status:sepolia` now classifies the mutable Sepolia layers as `complete`, `partial`, `missing`, or `placeholder-configured`
 - `npm run verify:sepolia` can resolve `paymasterSigner` and `l2UnlockSender` from the mutable 4337 manifest when that manifest is complete
 - `npm run status:sepolia` and `npm run verify:sepolia` can already resolve `EntryPoint v0.7` and `StarknetCore` from `config/stable-protocol-bindings/sepolia.json`
+- `npm run status:sepolia` now reports the Starknet app binding layer separately from both the reusable protocol bindings and the mutable L1 4337 manifest
+- `npm run verify:sepolia` now fails closed unless the Starknet app binding manifest exists, tracks the unlock sender and L1 recipient, and a Starknet RPC is available for live sender inspection
 - `L2_UNLOCK_VERIFIER` is now treated as a legacy compatibility alias for `L2_UNLOCK_SENDER`, which is the Starknet L2 sender felt consumed by `PhilUnlockInbox`
 - local helper runs pin Node 22 for backend/prover/bootstrap work even when the interactive shell defaults to an older Node
 - proof bundles live under `generated/proofs/` so compiler output cleanup does not erase them
@@ -166,3 +190,4 @@ Dev helper behavior:
 - The active bridge is still fact-registry-based.
 - World / World ID remains intentionally unimplemented.
 - `HUMANITY_PROVIDER=mock` is restricted to local development and testing.
+- `PhilUnlockSender` is intentionally minimal and owner-gated today; it is enough to make the Starknet sender path real and testable, but it is not yet a production-ready multi-factor policy engine.

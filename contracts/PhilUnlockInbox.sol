@@ -11,6 +11,8 @@ interface IStarknetCore {
 /// @notice Receives STARK unlock tickets via Starknet L2 messaging
 /// @dev Stores the latest valid ticket per vault address
 contract PhilUnlockInbox {
+    uint256 private constant CONSTRAINTS_HASH_WORD_BITS = 128;
+
     struct Ticket {
         uint64 nonce;
         uint32 validAfter;
@@ -46,7 +48,7 @@ contract PhilUnlockInbox {
 
     /// @notice Record an unlock ticket via a Starknet L2 message
     /// @dev Payload layout must match the L2 unlock sender:
-    ///      [vault, nonce, validAfter, validUntil, scope, constraintsHash]
+    ///      [vault, nonce, validAfter, validUntil, scope, constraintsHashHi128, constraintsHashLo128]
     function recordTicket(
         address vault,
         uint64 nonce,
@@ -58,13 +60,16 @@ contract PhilUnlockInbox {
         uint64 prev = lastNonce[vault];
         if (nonce <= prev) revert InvalidNonce();
 
-        uint256[] memory payload = new uint256[](6);
+        (uint256 constraintsHashHi, uint256 constraintsHashLo) = _splitConstraintsHash(constraintsHash);
+
+        uint256[] memory payload = new uint256[](7);
         payload[0] = uint256(uint160(vault));
         payload[1] = uint256(nonce);
         payload[2] = uint256(validAfter);
         payload[3] = uint256(validUntil);
         payload[4] = uint256(scope);
-        payload[5] = uint256(constraintsHash);
+        payload[5] = constraintsHashHi;
+        payload[6] = constraintsHashLo;
 
         lastNonce[vault] = nonce;
         _latestTicket[vault] = Ticket(nonce, validAfter, validUntil, scope, constraintsHash);
@@ -82,5 +87,11 @@ contract PhilUnlockInbox {
 
     function getTicket(address vault) external view returns (Ticket memory) {
         return _latestTicket[vault];
+    }
+
+    function _splitConstraintsHash(bytes32 constraintsHash) private pure returns (uint256 hi, uint256 lo) {
+        uint256 value = uint256(constraintsHash);
+        hi = value >> CONSTRAINTS_HASH_WORD_BITS;
+        lo = value & ((uint256(1) << CONSTRAINTS_HASH_WORD_BITS) - 1);
     }
 }

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { ethers } from 'ethers';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { RpcProvider as StarknetRpcProvider } from 'starknet';
 
 import { withRpcRetry } from '../shared/deploy/rpcRetry.mjs';
 import {
@@ -12,6 +13,11 @@ import {
 import {
   readStableProtocolBindings,
 } from '../shared/deploy/protocolBindings.mjs';
+import {
+  readStarknetAppBindings,
+  resolveUnlockSenderSource,
+} from '../shared/deploy/starknetAppBindings.mjs';
+import { requireStarknetFelt } from '../shared/deploy/starknetFelt.mjs';
 
 const DEFAULT_CHAIN_ID = 11155111;
 const L2_UNLOCK_SENDER_LABEL_WITH_ALIAS =
@@ -43,24 +49,8 @@ function requireAddress(label, value) {
   return ethers.getAddress(trimmed);
 }
 
-function requireUint256(label, value, { allowZero = true } = {}) {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) {
-    throw new Error(`${label} must be set.`);
-  }
-
-  try {
-    const parsed = BigInt(trimmed);
-    if (!allowZero && parsed === 0n) {
-      throw new Error(`${label} must be set to a non-zero Starknet contract felt.`);
-    }
-    return parsed;
-  } catch {
-    if (!allowZero && String(trimmed) === '0') {
-      throw new Error(`${label} must be set to a non-zero Starknet contract felt.`);
-    }
-    throw new Error(`${label} must be a uint256-compatible integer.`);
-  }
+function resolveStarknetRpcUrl(env) {
+  return usableEnvValue(env.STARKNET_RPC_URL) || usableEnvValue(env.STARKNET_RPC_URL_SEPOLIA);
 }
 
 function resolveSignerAddress(env, options) {
@@ -116,6 +106,10 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
     chainId: configuredChainId,
     rootDir,
   });
+  const starknetAppBindings = readStarknetAppBindings({
+    l1ChainId: configuredChainId,
+    rootDir,
+  });
   const stableProtocolBindings = readStableProtocolBindings({
     chainId: configuredChainId,
     rootDir,
@@ -127,11 +121,20 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
   const factRegistryOverride = usableEnvValue(env.FACT_REGISTRY);
   const entryPointOverride = usableEnvValue(env.ENTRY_POINT_V07);
   const starknetCoreOverride = usableEnvValue(env.STARKNET_CORE);
-  const l2UnlockSenderOverride =
-    usableEnvValue(env.L2_UNLOCK_SENDER) ||
-    usableEnvValue(env.L2_UNLOCK_VERIFIER);
+  const starknetRpcUrl = resolveStarknetRpcUrl(env);
+  const unlockSenderResolution = resolveUnlockSenderSource({
+    envSender: usableEnvValue(env.L2_UNLOCK_SENDER),
+    envLegacyAlias: usableEnvValue(env.L2_UNLOCK_VERIFIER),
+    aaManifestSender: aaDeployment.config.l2UnlockSender || '',
+    starknetAppSender: starknetAppBindings.contracts.unlockSender || '',
+    aaManifestPath: aaDeployment.manifestPath,
+    starknetAppManifestPath: starknetAppBindings.manifestPath,
+  });
 
   const errors = [];
+  if (unlockSenderResolution.error) {
+    errors.push(unlockSenderResolution.error);
+  }
   function resolveAddress(label, value) {
     try {
       return requireAddress(label, value);
@@ -142,7 +145,7 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
   }
   function resolveUint256(label, value, options) {
     try {
-      return requireUint256(label, value, options);
+      return requireStarknetFelt(label, value, options);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
       return null;
@@ -193,9 +196,16 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
     ),
     l2UnlockSender: resolveUint256(
       L2_UNLOCK_SENDER_LABEL_WITH_ALIAS,
-      l2UnlockSenderOverride || aaDeployment.config.l2UnlockSender,
+      unlockSenderResolution.value,
       { allowZero: false }
     ),
+    starknetAppBindings: {
+      manifestPath: starknetAppBindings.manifestPath,
+      exists: starknetAppBindings.exists,
+      unlockSender: starknetAppBindings.contracts.unlockSender || '',
+      l1Recipient: starknetAppBindings.bindings.l1Recipient || '',
+      starknetRpcUrl,
+    },
   };
 
   try {
@@ -211,6 +221,28 @@ export function readVerifySepoliaBindingsConfig(env = process.env, rootDir = ROO
 
   if (errors.length > 0) {
     throw new Error(errors.join('; '));
+  }
+
+  if (!starknetAppBindings.exists) {
+    throw new Error(
+      `Starknet app binding manifest is missing at ${starknetAppBindings.manifestPath}. ` +
+      'Track the app-specific PhilUnlockSender before running live Sepolia verification.'
+    );
+  }
+  if (!starknetAppBindings.contracts.unlockSender) {
+    throw new Error(
+      `Starknet app binding manifest at ${starknetAppBindings.manifestPath} does not track contracts.unlockSender.`
+    );
+  }
+  if (!starknetAppBindings.bindings.l1Recipient) {
+    throw new Error(
+      `Starknet app binding manifest at ${starknetAppBindings.manifestPath} does not yet track bindings.l1Recipient.`
+    );
+  }
+  if (!starknetRpcUrl) {
+    throw new Error(
+      'STARKNET_RPC_URL or STARKNET_RPC_URL_SEPOLIA must be set to live-verify the Starknet unlock sender.'
+    );
   }
 
   return config;
@@ -306,6 +338,11 @@ export async function runVerifySepoliaBindings(
 
     const onchainStarknetCore = ethers.getAddress(await unlockInbox.starknetCore());
     const onchainL2UnlockSender = await readUnlockSender(unlockInbox);
+    assertAddressMatch(
+      'Starknet app binding l1Recipient',
+      config.starknetAppBindings.l1Recipient,
+      onchainUnlockInbox
+    );
 
     assertAddressMatch(
       'HumanityVerifier.factRegistry()',
@@ -356,6 +393,20 @@ export async function runVerifySepoliaBindings(
       );
     }
 
+    const starknetProvider = new StarknetRpcProvider({
+      nodeUrl: config.starknetAppBindings.starknetRpcUrl,
+    });
+    let starknetClassHash = '';
+    try {
+      starknetClassHash = await starknetProvider.getClassHashAt(`0x${config.l2UnlockSender.toString(16)}`);
+    } catch (error) {
+      throw new Error(
+        `Starknet unlock sender could not be read at 0x${config.l2UnlockSender.toString(16)}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
     console.log(`Verified Sepolia deployment bindings on chain ${connectedChainId}:`);
     console.log(`  HumanityVerifier.factRegistry(): ${onchainFactRegistry}`);
     console.log(`  ProofGate.authorizedCaller(PHIL_IDENTITY_MINT): true`);
@@ -368,6 +419,8 @@ export async function runVerifySepoliaBindings(
     console.log(`  PHIL_PAYMASTER.philIdentityMint(): ${onchainPaymasterPhilIdentityMint}`);
     console.log(`  PhilUnlockInbox.starknetCore(): ${onchainStarknetCore}`);
     console.log(`  PhilUnlockInbox.l2UnlockSender(): ${onchainL2UnlockSender}`);
+    console.log(`  Starknet PhilUnlockSender.l1Recipient(): ${config.starknetAppBindings.l1Recipient}`);
+    console.log(`  Starknet PhilUnlockSender.classHash(): ${starknetClassHash}`);
   });
 }
 

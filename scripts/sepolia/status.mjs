@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ethers } from 'ethers';
+import { RpcProvider as StarknetRpcProvider } from 'starknet';
 
 import {
   SEPOLIA_CHAIN_ID,
@@ -17,6 +18,12 @@ import {
   inspectStableProtocolBindings,
   readStableProtocolBindings,
 } from '../../shared/deploy/protocolBindings.mjs';
+import {
+  getStarknetAppBindingsManifestPath,
+  inspectStarknetAppBindings,
+  readStarknetAppBindings,
+  resolveUnlockSenderSource,
+} from '../../shared/deploy/starknetAppBindings.mjs';
 import {
   readVerifySepoliaBindingsConfig,
   runVerifySepoliaBindings,
@@ -137,9 +144,11 @@ function derivePaymasterSignerAddressFromKey(privateKey) {
   }
 }
 
-function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
+function buildResolvedEnvStatus(env, aaDeployment, stableProtocol, starknetApp) {
   const explicitRpcUrl = String(env.RPC_URL || '').trim();
   const fallbackRpcUrl = String(env.RPC_URL_SEPOLIA || '').trim();
+  const explicitStarknetRpcUrl = String(env.STARKNET_RPC_URL || '').trim();
+  const fallbackStarknetRpcUrl = String(env.STARKNET_RPC_URL_SEPOLIA || '').trim();
 
   const explicitPaymasterSigner = usableEnvValue(env.PAYMASTER_SIGNER);
   const paymasterSignerFromKey = derivePaymasterSignerAddressFromKey(env.PAYMASTER_SIGNER_KEY);
@@ -149,10 +158,14 @@ function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
   const manifestStarknetCore = aaDeployment.config.starknetCore || '';
   const stableStarknetCore = stableProtocol?.starknetCoreAddress || '';
 
-  const explicitL2UnlockSender = usableEnvValue(env.L2_UNLOCK_SENDER);
-  const legacyL2UnlockVerifier = usableEnvValue(env.L2_UNLOCK_VERIFIER);
-  const manifestL2UnlockSender = aaDeployment.config.l2UnlockSender || '';
-  const manifestL2UnlockSenderSource = aaDeployment.resolvedFrom?.config?.l2UnlockSender || '';
+  const unlockSenderResolution = resolveUnlockSenderSource({
+    envSender: usableEnvValue(env.L2_UNLOCK_SENDER),
+    envLegacyAlias: usableEnvValue(env.L2_UNLOCK_VERIFIER),
+    aaManifestSender: aaDeployment.config.l2UnlockSender || '',
+    starknetAppSender: starknetApp.contracts.unlockSender || '',
+    aaManifestPath: aaDeployment.manifestPath,
+    starknetAppManifestPath: starknetApp.manifestPath,
+  });
   const explicitEntryPoint = usableEnvValue(env.ENTRY_POINT_V07);
   const manifestEntryPoint = aaDeployment.dependencies.EntryPoint || '';
   const stableEntryPoint = stableProtocol?.entryPointV07Address || '';
@@ -167,6 +180,13 @@ function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
       'RPC_URL',
       explicitRpcUrl || fallbackRpcUrl,
       explicitRpcUrl ? 'env:RPC_URL' : (fallbackRpcUrl ? 'env:RPC_URL_SEPOLIA' : 'missing')
+    ),
+    starknetRpcUrl: describeResolvedValueState(
+      'STARKNET_RPC_URL',
+      explicitStarknetRpcUrl || fallbackStarknetRpcUrl,
+      explicitStarknetRpcUrl
+        ? 'env:STARKNET_RPC_URL'
+        : (fallbackStarknetRpcUrl ? 'env:STARKNET_RPC_URL_SEPOLIA' : 'missing')
     ),
     paymasterSignerAddress: describeResolvedValueState(
       'PAYMASTER_SIGNER',
@@ -202,18 +222,14 @@ function buildResolvedEnvStatus(env, aaDeployment, stableProtocol) {
             ? `stable:${stableProtocol.filePath}#contracts.starknetCore`
             : 'missing'))
     ),
-    l2UnlockSender: describeResolvedValueState(
-      'L2_UNLOCK_SENDER',
-      explicitL2UnlockSender || legacyL2UnlockVerifier || manifestL2UnlockSender,
-      explicitL2UnlockSender
-        ? 'env:L2_UNLOCK_SENDER'
-        : (legacyL2UnlockVerifier
-          ? 'env:L2_UNLOCK_VERIFIER'
-          : (manifestL2UnlockSender
-          ? `manifest:${aaDeployment.manifestPath}#${manifestL2UnlockSenderSource || 'config.l2UnlockSender'}`
-          : 'missing')
-      )
-    ),
+    l2UnlockSender: {
+      ...describeResolvedValueState(
+        'L2_UNLOCK_SENDER',
+        unlockSenderResolution.value,
+        unlockSenderResolution.source
+      ),
+      error: unlockSenderResolution.error || '',
+    },
   };
 }
 
@@ -253,9 +269,10 @@ function summarizeMutableStack(manifest) {
   };
 }
 
-function determineOverallMutableClassification(identityProof, accountAbstraction, envStatus) {
+function determineOverallMutableClassification(identityProof, starknetApp, accountAbstraction, envStatus) {
   if (
     identityProof.classification === 'complete' &&
+    starknetApp.classification === 'complete' &&
     accountAbstraction.classification === 'complete'
   ) {
     if (
@@ -270,6 +287,12 @@ function determineOverallMutableClassification(identityProof, accountAbstraction
   }
 
   if (!identityProof.exists && !accountAbstraction.exists) {
+    if (!starknetApp.exists) {
+      return 'missing';
+    }
+  }
+
+  if (!identityProof.exists && !accountAbstraction.exists && !starknetApp.exists) {
     return 'missing';
   }
 
@@ -309,6 +332,10 @@ export async function collectSepoliaStatus(
   const effectiveEnv = buildEffectiveEnv(env);
   const stableArt = readStableArtManifest(rootDir);
   const stableProtocol = readStableProtocolManifest(rootDir);
+  const starknetApp = readStarknetAppBindings({
+    l1ChainId: SEPOLIA_CHAIN_ID,
+    rootDir,
+  });
   const stark = summarizeMutableStack(
     readMutableStackManifest({
       stack: MUTABLE_STACK_IDENTITY_PROOF,
@@ -324,7 +351,7 @@ export async function collectSepoliaStatus(
     })
   );
 
-  const envStatus = buildResolvedEnvStatus(env, aa4337, stableProtocol);
+  const envStatus = buildResolvedEnvStatus(env, aa4337, stableProtocol, starknetApp);
 
   const warnings = [];
   const errors = [];
@@ -337,6 +364,9 @@ export async function collectSepoliaStatus(
   }
   if (!stableProtocol) {
     warnings.push(`Stable Sepolia protocol bindings are missing at ${getStableProtocolBindingsManifestPath(SEPOLIA_CHAIN_ID, rootDir)}.`);
+  }
+  if (!starknetApp.exists) {
+    warnings.push(`Starknet app binding manifest is missing at ${getStarknetAppBindingsManifestPath(SEPOLIA_CHAIN_ID, rootDir)}.`);
   }
   if (!stark.exists) {
     warnings.push(`Mutable identity/proof manifest is missing at ${stark.manifestPath}.`);
@@ -361,6 +391,12 @@ export async function collectSepoliaStatus(
       warnings.push(`${manifest.label}: ${note}`);
     }
   }
+  for (const blocker of starknetApp.blockers) {
+    if (!starknetApp.exists && blocker === `Manifest is missing at ${starknetApp.manifestPath}.`) {
+      continue;
+    }
+    warnings.push(`Starknet app bindings: ${blocker}`);
+  }
   if (stark.classification === 'complete' && stark.dependencies.PhilSVGStorage && !stableArt) {
     warnings.push('Identity/proof manifest links reused art/data contracts, but the stable art/data manifest is missing.');
   }
@@ -378,6 +414,27 @@ export async function collectSepoliaStatus(
       'L2_UNLOCK_SENDER is missing or placeholder. Compatibility alias: L2_UNLOCK_VERIFIER. No app-specific Starknet L2 unlock sender is currently tracked for Sepolia.'
     );
   }
+  if (envStatus.l2UnlockSender.error) {
+    warnings.push(envStatus.l2UnlockSender.error);
+  }
+  if (
+    aa4337.config.l2UnlockSender &&
+    starknetApp.contracts.unlockSender &&
+    aa4337.config.l2UnlockSender !== starknetApp.contracts.unlockSender
+  ) {
+    warnings.push(
+      `4337 manifest L2 unlock sender (${aa4337.config.l2UnlockSender}) does not match Starknet app binding (${starknetApp.contracts.unlockSender}).`
+    );
+  }
+  if (
+    aa4337.components.PhilUnlockInbox &&
+    starknetApp.bindings.l1Recipient &&
+    aa4337.components.PhilUnlockInbox.toLowerCase() !== starknetApp.bindings.l1Recipient.toLowerCase()
+  ) {
+    warnings.push(
+      `Starknet app binding recipient (${starknetApp.bindings.l1Recipient}) does not match PhilUnlockInbox (${aa4337.components.PhilUnlockInbox}).`
+    );
+  }
 
   let stableProtocolVerification = null;
   if (stableProtocol && envStatus.rpcUrl.usable) {
@@ -392,6 +449,23 @@ export async function collectSepoliaStatus(
     } catch (error) {
       warnings.push(
         `Stable Sepolia protocol binding inspection failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  let starknetAppVerification = null;
+  if (starknetApp.exists && envStatus.starknetRpcUrl.usable) {
+    try {
+      const starknetProvider = new StarknetRpcProvider({ nodeUrl: envStatus.starknetRpcUrl.value });
+      starknetAppVerification = await inspectStarknetAppBindings(starknetProvider, starknetApp);
+      if (!starknetAppVerification.ok) {
+        warnings.push(
+          `Starknet unlock sender binding could not be verified live (${(starknetAppVerification.missing || []).join(', ')}).`
+        );
+      }
+    } catch (error) {
+      warnings.push(
+        `Starknet unlock sender inspection failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -416,6 +490,8 @@ export async function collectSepoliaStatus(
         paymasterSignerAddress: config.paymasterSignerAddress,
         starknetCoreAddress: config.starknetCoreAddress,
         l2UnlockSender: config.l2UnlockSender.toString(),
+        starknetAppManifestPath: config.starknetAppBindings?.manifestPath || '',
+        starknetL1Recipient: config.starknetAppBindings?.l1Recipient || '',
       },
     };
   } catch (error) {
@@ -485,17 +561,35 @@ export async function collectSepoliaStatus(
       notes: stableProtocol?.notes || {},
       verification: stableProtocolVerification,
     },
+    starknetApp: {
+      kind: 'starknet-app-bindings',
+      manifestPath: starknetApp.manifestPath,
+      exists: starknetApp.exists,
+      schema: starknetApp.schema || 'missing',
+      starknetNetwork: starknetApp.starknetNetwork,
+      l1ChainId: starknetApp.l1ChainId,
+      sourceScript: starknetApp.sourceScript,
+      classification: starknetApp.classification,
+      contracts: starknetApp.contracts,
+      bindings: starknetApp.bindings,
+      verification: starknetAppVerification,
+      blockers: starknetApp.blockers,
+    },
     mutable: {
       identityProof: stark,
       accountAbstraction: aa4337,
-      overallClassification: determineOverallMutableClassification(stark, aa4337, envStatus),
+      overallClassification: determineOverallMutableClassification(stark, starknetApp, aa4337, envStatus),
     },
     env: envStatus,
     config: configStatus,
     liveVerification,
     expectations: {
       reused: ['config/stable-art-backends/sepolia.json', 'config/stable-protocol-bindings/sepolia.json'],
-      redeployed: ['deployments/stark_11155111.json', 'deployments/4337_11155111.json'],
+      redeployed: [
+        'deployments/stark_11155111.json',
+        'config/starknet-app-bindings/sepolia.json',
+        'deployments/4337_11155111.json',
+      ],
     },
     warnings,
     errors,
@@ -558,6 +652,22 @@ export function printSepoliaStatus(status) {
       console.log('  Verification: verified');
     }
   }
+
+  console.log('\nStarknet app unlock sender');
+  console.log(`  State: ${status.starknetApp.classification}`);
+  console.log(`  Manifest: ${status.starknetApp.exists ? status.starknetApp.schema : 'missing'} (${status.starknetApp.manifestPath})`);
+  if (status.starknetApp.sourceScript) {
+    console.log(`  Source script: ${status.starknetApp.sourceScript}`);
+  }
+  printAddress('UnlockSender', status.starknetApp.contracts.unlockSender);
+  printAddress('Owner', status.starknetApp.contracts.owner);
+  printAddress('L1 Recipient', status.starknetApp.bindings.l1Recipient);
+  console.log(`  Payload Version: ${status.starknetApp.bindings.payloadVersion || '(missing)'}`);
+  console.log(`  Constraints Hash Encoding: ${status.starknetApp.bindings.constraintsHashEncoding || '(missing)'}`);
+  if (status.starknetApp.verification?.ok) {
+    console.log(`  Live Starknet Verification: class hash ${status.starknetApp.verification.classHash}`);
+  }
+  printLines('Blockers', status.starknetApp.blockers);
 
   console.log('\nMutable identity/proof stack');
   console.log(`  State: ${status.mutable.identityProof.classification}`);
@@ -646,6 +756,7 @@ export function printSepoliaStatus(status) {
 
   console.log('\nResolved config');
   console.log(`  RPC_URL: ${status.env.rpcUrl.usable ? `usable via ${status.env.rpcUrl.source}` : 'missing-or-placeholder'}`);
+  console.log(`  STARKNET_RPC_URL: ${status.env.starknetRpcUrl.usable ? `usable via ${status.env.starknetRpcUrl.source}` : 'missing-or-placeholder'}`);
   console.log(`  ENTRY_POINT_V07: ${status.env.entryPoint.usable ? `usable via ${status.env.entryPoint.source}` : 'missing-or-placeholder'}`);
   console.log(`  PAYMASTER_SIGNER: ${status.env.paymasterSignerAddress.usable ? `usable via ${status.env.paymasterSignerAddress.source}` : 'missing-or-placeholder'}`);
   console.log(`  STARKNET_CORE: ${status.env.starknetCore.usable ? `usable via ${status.env.starknetCore.source}` : 'missing-or-placeholder'}`);

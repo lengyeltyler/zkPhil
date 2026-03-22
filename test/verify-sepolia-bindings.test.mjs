@@ -29,11 +29,32 @@ function writeStableProtocolBindings(tempRoot) {
   });
 }
 
+function writeStarknetAppBindings(tempRoot, overrides = {}) {
+  writeJson(path.join(tempRoot, 'config', 'starknet-app-bindings', 'sepolia.json'), {
+    schema: 'zkphil-starknet-app-bindings-v1',
+    deploymentType: 'starknet-app-binding',
+    starknetNetwork: 'sepolia',
+    l1ChainId: 11155111,
+    sourceScript: 'scripts/starknet/deploy_unlock_sender.mjs',
+    contracts: {
+      unlockSender: '0x1234',
+      owner: '0x5678',
+    },
+    bindings: {
+      l1Recipient: '0x7000000000000000000000000000000000000007',
+      payloadVersion: 'zkphil-unlock-ticket-v1',
+      constraintsHashEncoding: 'bytes32-hi-lo-128',
+    },
+    ...overrides,
+  });
+}
+
 test('readVerifySepoliaBindingsConfig resolves the active Sepolia manifest set', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-sepolia-'));
   const deploymentsDir = path.join(tempRoot, 'deployments');
   fs.mkdirSync(deploymentsDir, { recursive: true });
   writeStableProtocolBindings(tempRoot);
+  writeStarknetAppBindings(tempRoot);
 
   const paymasterWallet = ethers.Wallet.createRandom();
 
@@ -50,10 +71,10 @@ test('readVerifySepoliaBindingsConfig resolves the active Sepolia manifest set',
 
   const config = readVerifySepoliaBindingsConfig(
     {
-      RPC_URL: 'https://rpc.example',
+      RPC_URL: 'https://rpc.invalid',
       CHAIN_ID: '11155111',
+      STARKNET_RPC_URL: 'https://starknet.invalid',
       PAYMASTER_SIGNER_KEY: paymasterWallet.privateKey,
-      L2_UNLOCK_SENDER: '0x1234',
     },
     tempRoot
   );
@@ -90,21 +111,21 @@ test('readVerifySepoliaBindingsConfig fails closed when Starknet bindings are mi
     () =>
       readVerifySepoliaBindingsConfig(
         {
-          RPC_URL: 'https://rpc.example',
+          RPC_URL: 'https://rpc.invalid',
           CHAIN_ID: '11155111',
           PAYMASTER_SIGNER: '0x6000000000000000000000000000000000000006',
           L2_UNLOCK_SENDER: '0x1234',
         },
         tempRoot
       ),
-    /STARKNET_CORE/
+    /STARKNET_CORE|Starknet app binding manifest/
   );
 
   assert.throws(
     () =>
       readVerifySepoliaBindingsConfig(
         {
-          RPC_URL: 'https://rpc.example',
+          RPC_URL: 'https://rpc.invalid',
           CHAIN_ID: '11155111',
           PAYMASTER_SIGNER: '0x6000000000000000000000000000000000000006',
         },
@@ -119,6 +140,7 @@ test('readVerifySepoliaBindingsConfig can resolve mutable 4337 config from the m
   const deploymentsDir = path.join(tempRoot, 'deployments');
   fs.mkdirSync(deploymentsDir, { recursive: true });
   writeStableProtocolBindings(tempRoot);
+  writeStarknetAppBindings(tempRoot);
 
   writeJson(path.join(deploymentsDir, 'stark_11155111.json'), {
     schema: 'zkphil-mutable-stack-v1',
@@ -170,8 +192,9 @@ test('readVerifySepoliaBindingsConfig can resolve mutable 4337 config from the m
 
   const config = readVerifySepoliaBindingsConfig(
     {
-      RPC_URL: 'https://rpc.example',
+      RPC_URL: 'https://rpc.invalid',
       CHAIN_ID: '11155111',
+      STARKNET_RPC_URL: 'https://starknet.invalid',
     },
     tempRoot
   );
@@ -187,6 +210,7 @@ test('readVerifySepoliaBindingsConfig accepts the legacy env alias for compatibi
   const deploymentsDir = path.join(tempRoot, 'deployments');
   fs.mkdirSync(deploymentsDir, { recursive: true });
   writeStableProtocolBindings(tempRoot);
+  writeStarknetAppBindings(tempRoot);
 
   writeJson(path.join(deploymentsDir, 'stark_11155111.json'), {
     PhilIdentityGate: '0x1000000000000000000000000000000000000001',
@@ -202,8 +226,9 @@ test('readVerifySepoliaBindingsConfig accepts the legacy env alias for compatibi
 
   const config = readVerifySepoliaBindingsConfig(
     {
-      RPC_URL: 'https://rpc.example',
+      RPC_URL: 'https://rpc.invalid',
       CHAIN_ID: '11155111',
+      STARKNET_RPC_URL: 'https://starknet.invalid',
       L2_UNLOCK_VERIFIER: '0x1234',
     },
     tempRoot
@@ -217,6 +242,12 @@ test('readVerifySepoliaBindingsConfig rejects zero L2 unlock sender values', () 
   const deploymentsDir = path.join(tempRoot, 'deployments');
   fs.mkdirSync(deploymentsDir, { recursive: true });
   writeStableProtocolBindings(tempRoot);
+  writeStarknetAppBindings(tempRoot, {
+    contracts: {
+      unlockSender: '',
+      owner: '0x5678',
+    },
+  });
 
   writeJson(path.join(deploymentsDir, 'stark_11155111.json'), {
     PhilIdentityGate: '0x1000000000000000000000000000000000000001',
@@ -235,11 +266,12 @@ test('readVerifySepoliaBindingsConfig rejects zero L2 unlock sender values', () 
     () =>
       readVerifySepoliaBindingsConfig(
         {
-          RPC_URL: 'https://rpc.example',
+          RPC_URL: 'https://rpc.invalid',
           CHAIN_ID: '11155111',
+          STARKNET_RPC_URL: 'https://starknet.invalid',
         },
         tempRoot
       ),
-    /non-zero Starknet contract felt/
+    /config\.l2UnlockSender: Starknet felt must be non-zero|L2_UNLOCK_SENDER/
   );
 });
